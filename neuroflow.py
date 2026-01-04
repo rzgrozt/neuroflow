@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QSplitter, QSlider, QWidget
 )
 from PyQt6.QtCore import (
-    Qt, QObject, QThread, pyqtSignal, pyqtSlot
+    Qt, QObject, QThread, pyqtSignal, pyqtSlot, QTimer
 )
 
 # Configure Logging
@@ -358,6 +358,11 @@ class ERPViewer(QMainWindow):
         self.current_time = 0.0
         self.vline = None # Reference to the vertical line on plot
         
+        # Debounce Timer for smoother sliding
+        self.debounce_timer = QTimer()
+        self.debounce_timer.setSingleShot(True)
+        self.debounce_timer.timeout.connect(self.update_topomap_heavy)
+
         self.init_ui()
         self.plot_initial_state()
 
@@ -419,8 +424,8 @@ class ERPViewer(QMainWindow):
         self.slider_time.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.slider_time.setTickInterval(50) # Tick every 50ms
         self.slider_time.valueChanged.connect(self.on_time_changed)
-        # sliderReleased to do heavy plot update if needed (optional optimization)
-        self.slider_time.sliderReleased.connect(self.update_topomap_heavy)
+        # sliderReleased removed in favor of debounced valueChanged
+        # self.slider_time.sliderReleased.connect(self.update_topomap_heavy)
 
         controls_layout.addWidget(self.lbl_time)
         controls_layout.addWidget(self.slider_time)
@@ -474,8 +479,10 @@ class ERPViewer(QMainWindow):
         # User requirement: "consider updating only on sliderReleased or use a slight delay".
         # We will Implement the 'sliderReleased' approach for the heavy topomap, 
         # but maybe doing it here makes it 'feel' better if data is small. 
-        # For safety/performance, we will ONLY move the line here. 
-        # Topomap updates in sliderReleased.
+        # For safety/performance, we will ONLY move the line here and trigger the timer.
+        # Topomap updates when timer fires (user stopped moving or paused).
+        
+        self.debounce_timer.start(100) # Reset timer to 100ms
     
     def update_topomap_heavy(self):
         """
