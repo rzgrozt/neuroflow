@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
-# Optional Dependency for Connectivity
 try:
     import mne_connectivity
     HAS_CONNECTIVITY = True
@@ -29,13 +28,10 @@ from PyQt6.QtCore import (
     Qt, QObject, QThread, pyqtSignal, pyqtSlot, QTimer, QSize
 )
 
-# Configure Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("NeuroFlow")
 
-# -----------------------------------------------------------------------------
-# ARCHITECTURE: AnalysisWorker (Model / Controller Logic on Thread)
-# -----------------------------------------------------------------------------
+
 
 class ConnectivityDialog(QDialog):
     """
@@ -49,7 +45,7 @@ class ConnectivityDialog(QDialog):
         self.layout = QVBoxLayout(self)
         self.canvas = None
         
-        # Add a "Close" button at the bottom
+        
         self.btn_close = QPushButton("Close")
         self.btn_close.clicked.connect(self.accept)
         self.layout.addWidget(self.btn_close)
@@ -61,10 +57,9 @@ class ConnectivityDialog(QDialog):
             self.canvas.deleteLater()
         
         self.canvas = FigureCanvasQTAgg(fig)
-        self.layout.insertWidget(0, self.canvas) # Insert at top
+        self.layout.insertWidget(0, self.canvas)
         
-        # Style
-        fig.patch.set_facecolor('#2b2b2b') # Dark background match
+        fig.patch.set_facecolor('#2b2b2b')
         self.canvas.draw()
 
 class AnalysisWorker(QObject):
@@ -102,9 +97,8 @@ class AnalysisWorker(QObject):
         self.log_message.emit(f"Function: load_data | Loading: {filename}")
         
         try:
-            # 1. Load Data based on extension
+
             if file_path.endswith('.vhdr'):
-                # BrainVision (.vhdr header file)
                 self.raw = mne.io.read_raw_brainvision(file_path, preload=True)
             elif file_path.endswith('.fif'):
                 self.raw = mne.io.read_raw_fif(file_path, preload=True)
@@ -115,9 +109,6 @@ class AnalysisWorker(QObject):
                 return
 
 
-            # 2. Auto-Detect & Set Channel Types (EOG/ECG)
-            # This must be done BEFORE setting the montage to avoid "overlapping positions" errors
-            # if EOG/EEG sensors map to the same default location.
             ch_types = {}
             for ch_name in self.raw.ch_names:
                 name_lower = ch_name.lower()
@@ -130,9 +121,6 @@ class AnalysisWorker(QObject):
                 self.log_message.emit(f"Setting channel types: {ch_types}")
                 self.raw.set_channel_types(ch_types)
 
-            # 3. Neuroscience Logic: Standardizing Electrode Positions
-            # BrainVision and other raw formats often lack 3D sensor locations.
-            # We strictly check if montage is missing before setting a standard one.
             if self.raw.get_montage() is None:
                 self.log_message.emit("Montage is missing. Applying standard_1020 montage...")
                 try:
@@ -146,7 +134,6 @@ class AnalysisWorker(QObject):
 
             self.data_loaded.emit(self.raw)
             
-            # 4. Extract Events (Annotations -> Events)
             try:
                 events, event_id = mne.events_from_annotations(self.raw, verbose=False)
                 self.events = events
@@ -155,7 +142,7 @@ class AnalysisWorker(QObject):
                 self.events_loaded.emit(event_id)
             except Exception:
                 self.log_message.emit("No events found in annotations.")
-                self.events_loaded.emit({}) # Emit empty dict
+                self.events_loaded.emit({})
 
             self.log_message.emit(f"Successfully loaded {len(self.raw.ch_names)} channels, {self.raw.times[-1]:.2f}s duration.")
             self.finished.emit()
@@ -171,9 +158,8 @@ class AnalysisWorker(QObject):
         """
         Runs the preprocessing pipeline: Filtering -> PSD Calculation.
         
-        FIXED LOGIC:
-        - l_freq: Lower pass-band edge (High-pass filter value).
-        - h_freq: Upper pass-band edge (Low-pass filter value).
+        l_freq: Lower pass-band edge (High-pass filter value).
+        h_freq: Upper pass-band edge (Low-pass filter value).
         """
         if self.raw is None:
             self.error_occurred.emit("No data loaded. Please load a dataset first.")
@@ -185,12 +171,8 @@ class AnalysisWorker(QObject):
         result_raw = self.raw.copy()
 
         try:
-            # 1. Filtering
             filter_info = []
             
-            # Apply Bandpass (Low-pass + High-pass)
-            # l_freq = High-pass cutoff (e.g., 1.0 Hz)
-            # h_freq = Low-pass cutoff (e.g., 40.0 Hz)
             if l_freq > 0 or h_freq > 0:
                 lf = l_freq if l_freq > 0 else None
                 hf = h_freq if h_freq > 0 else None
@@ -199,7 +181,6 @@ class AnalysisWorker(QObject):
                 result_raw.filter(l_freq=lf, h_freq=hf, fir_design='firwin', verbose=False)
                 filter_info.append(f"Bandpass: {lf}-{hf} Hz")
 
-            # Apply Notch
             if notch_freq > 0:
                 self.log_message.emit(f"Applying Notch Filter at {notch_freq} Hz")
                 result_raw.notch_filter(freqs=np.array([notch_freq]), fir_design='firwin', verbose=False)
@@ -208,14 +189,11 @@ class AnalysisWorker(QObject):
             if not filter_info:
                 filter_info.append("Raw Signal")
 
-            # 2. PSD Calculation
             self.log_message.emit("Computing Power Spectral Density (PSD)...")
             
-            # Use Welch's method
             spectrum = result_raw.compute_psd(fmax=100)
             psds, freqs = spectrum.get_data(return_freqs=True)
             
-            # Average across channels
             psd_mean = psds.mean(axis=0)
             
             filter_str = " | ".join(filter_info)
@@ -230,7 +208,6 @@ class AnalysisWorker(QObject):
     def run_ica(self):
         """
         Fits ICA on the CURRENTLY filtered data (or raw if no filter).
-        Use standard settings: n_components=15, method='fastica'.
         """
         if self.raw is None:
             self.error_occurred.emit("No data loaded. Cannot run ICA.")
@@ -239,45 +216,14 @@ class AnalysisWorker(QObject):
         self.log_message.emit("Fitting ICA (n_components=15, fastica)... This may take a moment.")
         
         try:
-            # We usually recommend 1Hz high-pass for ICA. 
-            # We will use self.raw. In a real app, we should ensure self.raw is filtered.
-            # Here we assume the user has run the pipeline or we assume raw is OK.
-            # Important: fitting on a copy to be safe, though ICA fit doesn't alter data inplace unless asked?
-            # MNE ICA fit takes a Raw object.
-            
-            # Create ICA object
             self.ica = mne.preprocessing.ICA(n_components=15, method='fastica', random_state=97, max_iter='auto')
             
-            # Fit on a copy of data (MNE recommends high-pass filtered data for fitting)
-            # We'll validly assume the user might have filtered 'self.raw' in place? 
-            # Wait, 'run_pipeline' operates on 'self.raw.copy()'. 'self.raw' is always the ORIGINAL raw loaded.
-            # NOTE: Ideally ICA should be fitted on the *filtered* data. 
-            # TO FIX: The 'run_pipeline' method currently DOES NOT update 'self.raw', it creates 'result_raw'.
-            # If we want to support the workflow "Filter -> ICA", we need to store the filtered result or allow fitting on raw.
-            # Given the USER REQUEST: "Ensure ICA is only run after the data is loaded and filtered (High-pass > 1Hz is recommended for ICA)."
-            # We don't have a persistent "filtered" object in the current class design (it was 'result_raw').
-            # COMPROMISE: We will Fit on 'self.raw' but Warn the user, OR (better) we should have stored the filtered version.
-            # Let's modify 'run_pipeline' to Update 'self.current_processed_raw' or similar?
-            # Or just fit on self.raw for MVP and rely on user to have filtered?
-            # Wait, if 'run_pipeline' just emits PSD and doesn't save the filtered raw, we can't fit ICA on it!
-            # Let's filter a temporary copy here for fitting if needed, or assume self.raw is what we use.
-            # Re-reading: "Ensure ICA is only run after the data is loaded and filtered"
-            # -> This implies we NEED the filtered data.
-            # Let's change this to: Fit on a COPY of self.raw that we apply a 1Hz HP filter to specifically for ICA fitting, 
-            # OR we change architecture to store processed data.
-            # Best approach for MVP integrity: Apply a 1Hz High-pass strictly for the ICA fit here.
-            
             raw_for_ica = self.raw.copy()
-            # Apply 1.0Hz Highpass for stable ICA if not already done? 
-            # The prompt says "Ensure... High-pass > 1Hz is recommended". 
-            # We'll just filter this copy to be safe.
             raw_for_ica.filter(l_freq=1.0, h_freq=None, verbose=False) 
             
             self.ica.fit(raw_for_ica, verbose=False)
             self.log_message.emit("ICA Fit Complete. Emitting signal to plot components...")
             
-            # Plot components immediately
-            # self.ica.plot_components(show=True) -> MOVED TO MAIN THREAD
             self.ica_ready.emit(self.ica)
             self.finished.emit()
 
@@ -295,7 +241,7 @@ class AnalysisWorker(QObject):
             return
             
         try:
-            # Parse excludes
+
             if not exclude_str.strip():
                 excludes = []
             else:
@@ -304,20 +250,8 @@ class AnalysisWorker(QObject):
             self.log_message.emit(f"Applying ICA exclusion: {excludes}")
             self.ica.exclude = excludes
             
-            # Apply to a COPY of raw
-            # We want to show the Cleaner signal PSD.
-            # So: Raw -> Apply ICA -> Compute PSD
-            
             clean_raw = self.raw.copy()
             self.ica.apply(clean_raw)
-            
-            # Now we compute PSD on this clean_raw
-            # We should probably apply the SAME High/Low pass filters the user had?
-            # We don't know what they were unless we store them. 
-            # For this 'Apply ICA' step, let's just show the PSD of the ICA-cleaned raw (maybe just 1-40Hz default or raw).
-            # To be consistent, let's just do a quick PSD of the cleaned data.
-            # Better: Apply default filters (1-40) to look nice? Or just raw.
-            # Let's just do Raw -> ICA -> PSD (0-100Hz).
             
             self.log_message.emit(f"Computing PSD on ICA-cleaned data...")
             spectrum = clean_raw.compute_psd(fmax=100)
@@ -353,15 +287,12 @@ class AnalysisWorker(QObject):
         self.log_message.emit(f"Computing ERP for: {event_name} (tmin={tmin}, tmax={tmax})...")
         
         try:
-            # Select specific event ID
+
             specific_event_id = {event_name: self.event_id[event_name]}
             
-            # Create Epochs
-            # baseline=(None, 0) applies baseline correction from start of epoch to 0 (stimulus onset)
             epochs = mne.Epochs(self.raw, self.events, event_id=specific_event_id, 
                                 tmin=tmin, tmax=tmax, baseline=(tmin, 0), preload=True, verbose=False)
             
-            # Compute Evoked (Average)
             evoked = epochs.average()
             
             self.log_message.emit(f"ERP Computed. Averaged {len(epochs)} epochs.")
@@ -385,34 +316,19 @@ class AnalysisWorker(QObject):
         self.log_message.emit(f"Computing TFR for channel {ch_name} (Freqs: {l_freq}-{h_freq}Hz)...")
         
         try:
-            # Create frequencies array
+
             freqs = np.arange(l_freq, h_freq, 1.0)
             n_cycles = freqs / n_cycles_div
-            
-            # Use current Events if available, otherwise just use the raw data?
-            # TFR usually needs Epochs.
-            # Strategy: Create fixed length epochs if no events, OR use existing events.
-            # For simplicity and robustness given the prompt implies "Analysis", implies Event-Related (ERD/ERS).
-            # We will use the SAME events logic as ERP. If no events, we can't do ERD/ERS properly.
             
             if self.events is None:
                 self.error_occurred.emit("TFR requires events/epochs to visualize ERD/ERS. No events found.")
                 return
                 
-            # Pick channel
             picks = [ch_name]
-            
-            # Epoching (Standardizing to -1s to 2s or similar, or based on user inputs? 
-            # We'll use a standard window for "Advanced Analysis" or reuse ERP params?
-            # Let's use a standard wide window for TFR to see baseline.
             tmin, tmax = -1.0, 2.0 
             
-            # Create Epochs (All events combined or specific? usually we want specific)
-            # For MVP, we'll use "All Events" or just the first event type to show *something*.
-            # Or better: Just use the first event ID found if multiple.
             event_id_to_use = None
             if self.event_id:
-                # Pick first key
                 first_key = list(self.event_id.keys())[0]
                 event_id_to_use = {first_key: self.event_id[first_key]}
             
@@ -420,10 +336,6 @@ class AnalysisWorker(QObject):
                                 tmin=tmin, tmax=tmax, picks=picks,
                                 baseline=(tmin, 0), preload=True, verbose=False)
             
-            # Subtract evoked response (optional, but good for induced power)
-            # epochs.subtract_evoked() 
-            
-            # Run Morlet
             power = mne.time_frequency.tfr_morlet(
                 epochs, n_cycles=n_cycles, return_itc=False,
                 freqs=freqs, average=True, verbose=False
@@ -476,31 +388,23 @@ class AnalysisWorker(QObject):
         self.log_message.emit("Computing Alpha Band Connectivity (wPLI)...")
         
         try:
-            # Connectivity usually requires epochs.
-            # Strategy: If events exist, use them. If not, make fixed length epochs.
-            # We use 4s epochs to get decent frequency resolution for 8-12Hz.
+
             tmin, tmax = 0, 4.0 
             
             if self.events is not None:
-                 # Use existing events if available
                  epochs = mne.Epochs(self.raw, self.events, event_id=None, tmin=tmin, tmax=tmax, 
                                      baseline=None, preload=True, verbose=False)
             else:
-                 # Fallback to fixed length epochs
                  epochs = mne.make_fixed_length_epochs(self.raw, duration=4.0, preload=True, verbose=False)
 
-            # Compute Connectivity
-            # fmin=8, fmax=12 for Alpha
             fmin, fmax = 8.0, 12.0
             sfreq = self.raw.info['sfreq']
             
-            # Compute wPLI
             con = mne_connectivity.spectral_connectivity_epochs(
                 epochs, method='wpli', mode='multitaper', sfreq=sfreq,
                 fmin=fmin, fmax=fmax, faverage=True, mt_adaptive=True, n_jobs=1, verbose=False
             )
             
-            # Emit result
             self.connectivity_ready.emit(con)
             self.finished.emit()
             self.log_message.emit("Connectivity Computation Complete.")
@@ -509,9 +413,7 @@ class AnalysisWorker(QObject):
             self.error_occurred.emit(f"Connectivity Error: {str(e)}")
             traceback.print_exc()
 
-# -----------------------------------------------------------------------------
-# UI COMPONENTS: ERP Viewer Window
-# -----------------------------------------------------------------------------
+
 
 class ERPViewer(QMainWindow):
     """
@@ -529,14 +431,12 @@ class ERPViewer(QMainWindow):
         self.resize(800, 900)
         self.apply_dark_theme()
         
-        # Data properties
         self.times = self.evoked.times
         self.tmin = self.times[0]
         self.tmax = self.times[-1]
         self.current_time = 0.0
-        self.vline = None # Reference to the vertical line on plot
+        self.vline = None
         
-        # Debounce Timer for smoother sliding
         self.debounce_timer = QTimer()
         self.debounce_timer.setSingleShot(True)
         self.debounce_timer.timeout.connect(self.update_topomap_heavy)
@@ -570,40 +470,31 @@ class ERPViewer(QMainWindow):
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout(main_widget)
         
-        # Splitter for adjustable heights
         splitter = QSplitter(Qt.Orientation.Vertical)
         
-        # 1. TOP PLOT : Butterfly
         self.butterfly_canvas = MplCanvas(self, width=5, height=4)
         splitter.addWidget(self.butterfly_canvas)
         
-        # 2. BOTTOM AREA : Topomap + Controls
         bottom_widget = QWidget()
         bottom_layout = QVBoxLayout(bottom_widget)
         
-        # Topomap Canvas
         self.topomap_canvas = MplCanvas(self, width=5, height=4)
         bottom_layout.addWidget(self.topomap_canvas)
         
-        # Controls Row
         controls_layout = QHBoxLayout()
         
         self.lbl_time = QLabel("Time: 0 ms")
         self.lbl_time.setFixedWidth(100)
         
-        # Slider setup
-        # Convert time range to milliseconds for integer slider
         min_ms = int(self.tmin * 1000)
         max_ms = int(self.tmax * 1000)
         
         self.slider_time = QSlider(Qt.Orientation.Horizontal)
         self.slider_time.setRange(min_ms, max_ms)
-        self.slider_time.setValue(0) # Start at 0ms (stimulus onset)
+        self.slider_time.setValue(0)
         self.slider_time.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.slider_time.setTickInterval(50) # Tick every 50ms
+        self.slider_time.setTickInterval(50)
         self.slider_time.valueChanged.connect(self.on_time_changed)
-        # sliderReleased removed in favor of debounced valueChanged
-        # self.slider_time.sliderReleased.connect(self.update_topomap_heavy)
 
         controls_layout.addWidget(self.lbl_time)
         controls_layout.addWidget(self.slider_time)
@@ -615,68 +506,38 @@ class ERPViewer(QMainWindow):
 
     def plot_initial_state(self):
         """Draws the static Butterfly plot and initial Topomap."""
-        # --- Plot Butterfly ---
         ax = self.butterfly_canvas.axes
         ax.clear()
         
-        # MNE plot onto our axes
-        # spatial_colors=True colors lines by sensor position
         self.evoked.plot(axes=ax, spatial_colors=True, show=False, time_unit='s')
         
-        # Customize look to match simple dark theme if MNE overrode it, 
-        # but MNE plot usually handles its own styling. 
-        # We just ensure the facecolor matches.
-        # Note: MNE's plot() might change title/labels.
         ax.set_title("Global Field Power (Butterfly Plot)", color='white')
         ax.xaxis.label.set_color('white')
         ax.yaxis.label.set_color('white')
         ax.tick_params(colors='white')
         
-        # Add interactive vertical line at t=0
         self.vline = ax.axvline(x=0, color='white', linestyle='--', linewidth=1.5, alpha=0.8)
         self.butterfly_canvas.draw()
         
-        # --- Plot Initial Topomap using the 'heavy' update logic ---
         self.update_topomap_heavy()
 
     def on_time_changed(self, value):
-        """Called repeatedly while dragging slider."""
         time_sec = value / 1000.0
         self.current_time = time_sec
         self.lbl_time.setText(f"Time: {value} ms")
         
-        # Update Vertical Line position efficiently (blit would be better but simple redraw is OK for this scale)
         if self.vline:
             self.vline.set_xdata([time_sec, time_sec])
-            self.butterfly_canvas.draw() # Redraw just to move line
-            
-        # NOTE: We can skip full topomap redraw here if it's too slow, 
-        # and only do it on release.
-        # But let's try to see if MNE's topomap is fast enough for continuous scrubbing.
-        # Usually it is NOT fast enough for 60fps, so we might throttle or only do on release.
-        # User requirement: "consider updating only on sliderReleased or use a slight delay".
-        # We will Implement the 'sliderReleased' approach for the heavy topomap, 
-        # but maybe doing it here makes it 'feel' better if data is small. 
-        # For safety/performance, we will ONLY move the line here and trigger the timer.
-        # Topomap updates when timer fires (user stopped moving or paused).
+            self.butterfly_canvas.draw()
         
-        self.debounce_timer.start(100) # Reset timer to 100ms
+        self.debounce_timer.start(100)
     
     def update_topomap_heavy(self):
-        """
-        Re-plots the topomap. 
-        Called on sliderReleased OR manual trigger.
-        Allows for smoother UI during dragging.
-        """
-        # Get current time from stored state (updated by slider move)
         t = self.current_time
         
         ax = self.topomap_canvas.axes
         ax.clear()
         
-        # Plot topomap
-        # times=[t] plots a single map
-        # colorbar=True adds a colorbar, slightly squishing the plot
         try:
             self.evoked.plot_topomap(times=[t], axes=ax, show=False, colorbar=False,
                                      outlines='head', sphere='auto')
@@ -692,11 +553,10 @@ class ERPViewer(QMainWindow):
 
 class MplCanvas(FigureCanvasQTAgg):
     def __init__(self, parent=None, width=5, height=4, dpi=100):
-        # Neural Data Visualization Theme
         plt.style.use('dark_background')
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.axes = self.fig.add_subplot(111)
-        self.fig.patch.set_facecolor('#1e1e1e') # Match app background
+        self.fig.patch.set_facecolor('#1e1e1e')
         self.axes.set_facecolor('#1e1e1e')
         
         super(MplCanvas, self).__init__(self.fig)
@@ -722,14 +582,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("NeuroFlow - Professional EEG Analysis")
         self.resize(1300, 850)
-        self.raw_data = None # Store reference to plot sensors logic
+        self.raw_data = None
         
-        # Initialize Threading
         self.thread = QThread()
         self.worker = AnalysisWorker()
         self.worker.moveToThread(self.thread)
         
-        # Connect Signals
         self.worker.log_message.connect(self.log_status)
         self.worker.error_occurred.connect(self.show_error)
         self.worker.data_loaded.connect(self.on_data_loaded)
@@ -741,7 +599,6 @@ class MainWindow(QMainWindow):
         self.worker.connectivity_ready.connect(self.plot_connectivity)
         self.worker.save_finished.connect(self.on_save_finished)
         
-        # Connect worker slots
         self.request_load_data.connect(self.worker.load_data)
         self.request_run_pipeline.connect(self.worker.run_pipeline)
         self.request_run_ica.connect(self.worker.run_ica)
@@ -753,26 +610,21 @@ class MainWindow(QMainWindow):
         
         self.thread.start()
         
-        # UI Setup
         self.apply_dark_theme()
         self.init_ui()
         self.init_toolbar()
         self.create_menu()
 
     def init_toolbar(self):
-        """Creates the Main Toolbar."""
         self.toolbar = QToolBar("Main Toolbar")
         self.toolbar.setIconSize(QSize(24, 24))
         self.addToolBar(self.toolbar)
         
-        # Save Action
-        # Reusing standard icons or text if icons missing
         save_action = QAction("💾 Save Clean Data", self)
         save_action.setStatusTip("Save the processed data to .fif")
         save_action.triggered.connect(self.on_save_clean_data)
         self.toolbar.addAction(save_action)
         
-        # Screenshot Action
         screenshot_action = QAction("📷 Screenshot", self)
         screenshot_action.setStatusTip("Take a screenshot of the application")
         screenshot_action.triggered.connect(self.on_take_screenshot)
@@ -901,12 +753,9 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
 
-        # ----------------------
-        # LEFT SIDEBAR : Modern Accordion
-        # ----------------------
         sidebar = QFrame()
         sidebar.setFrameShape(QFrame.Shape.StyledPanel)
-        sidebar.setFixedWidth(350) # Increased width slightly for comfort
+        sidebar.setFixedWidth(350)
         sidebar.setStyleSheet("background-color: #252526; border-radius: 8px;")
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setSpacing(10)
@@ -925,7 +774,8 @@ class MainWindow(QMainWindow):
         layout_data.setSpacing(15)
         layout_data.setContentsMargins(10, 15, 10, 10)
         
-        # Dataset controls
+        layout_data.setContentsMargins(10, 15, 10, 10)
+        
         gb_d = QGroupBox("Dataset")
         l_d = QVBoxLayout()
         l_d.setSpacing(8)
@@ -943,7 +793,9 @@ class MainWindow(QMainWindow):
         gb_d.setLayout(l_d)
         layout_data.addWidget(gb_d)
         
-        # Pipeline controls
+        gb_d.setLayout(l_d)
+        layout_data.addWidget(gb_d)
+        
         gb_p = QGroupBox("Signal Pipeline")
         l_p = QVBoxLayout()
         l_p.setSpacing(8)
@@ -1096,16 +948,11 @@ class MainWindow(QMainWindow):
         self.log_area.setMinimumHeight(150) # Use min height instead
         sidebar_layout.addWidget(self.log_area)
 
-        # Add Sidebar to Main
         main_layout.addWidget(sidebar)
 
-        # ----------------------
-        # MAIN CONTENT AREA (Tabs)
-        # ----------------------
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet("QTabWidget::pane { border: 0; }")
         
-        # TAB 1: Signal Monitor
         self.tab_signal = QWidget()
         tab1_layout = QVBoxLayout(self.tab_signal)
         tab1_layout.setContentsMargins(0,0,0,0)
@@ -1120,9 +967,8 @@ class MainWindow(QMainWindow):
         
         self.tabs.addTab(self.tab_signal, "Signal Monitor")
         
-        # TAB 2: Advanced Analysis
         self.tab_advanced = QWidget()
-        self.tab2_layout = QVBoxLayout(self.tab_advanced) # Keep reference to replace canvas
+        self.tab2_layout = QVBoxLayout(self.tab_advanced)
         self.tab2_layout.setContentsMargins(0,0,0,0)
         
         self.canvas_advanced = MplCanvas(self, width=5, height=4, dpi=100)
@@ -1198,9 +1044,6 @@ class MainWindow(QMainWindow):
             lp = float(text_lp) if text_lp else 0.0
             notch = float(text_notch) if text_notch else 0.0
             
-            # Corrections:
-            # GUI "High-pass" -> MNE l_freq (Lower pass-band edge)
-            # GUI "Low-pass"  -> MNE h_freq (Upper pass-band edge)
             l_freq = hp
             h_freq = lp
             
