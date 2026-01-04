@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QFileDialog, QFrame,
-    QTextEdit, QMessageBox, QGroupBox
+    QTextEdit, QMessageBox, QGroupBox, QComboBox, QDoubleSpinBox
 )
 from PyQt6.QtCore import (
     Qt, QObject, QThread, pyqtSignal, pyqtSlot
@@ -37,12 +37,18 @@ class AnalysisWorker(QObject):
     log_message = pyqtSignal(str)
     data_loaded = pyqtSignal(object)  # Emits the MNE Raw object
     psd_ready = pyqtSignal(object, object, str)  # Emits (freqs, psd, filter_info_str)
+    psd_ready = pyqtSignal(object, object, str)  # Emits (freqs, psd, filter_info_str)
     ica_ready = pyqtSignal(object) # Emits the fitted ICA object for plotting on Main Thread
+    events_loaded = pyqtSignal(dict)  # Emits event_id mapping
+    erp_ready = pyqtSignal(object)    # Emits evoked object
 
     def __init__(self):
         super().__init__()
         self.raw = None  # Holds the MNE Raw object
+        self.raw = None  # Holds the MNE Raw object
         self.ica = None  # Holds the fitted ICA object
+        self.events = None
+        self.event_id = None
 
     @pyqtSlot(str)
     def load_data(self, file_path: str):
@@ -97,6 +103,18 @@ class AnalysisWorker(QObject):
                 self.log_message.emit("Dataset already contains montage information.")
 
             self.data_loaded.emit(self.raw)
+            
+            # 4. Extract Events (Annotations -> Events)
+            try:
+                events, event_id = mne.events_from_annotations(self.raw, verbose=False)
+                self.events = events
+                self.event_id = event_id
+                self.log_message.emit(f"Events found: {len(events)} events extracted.")
+                self.events_loaded.emit(event_id)
+            except Exception:
+                self.log_message.emit("No events found in annotations.")
+                self.events_loaded.emit({}) # Emit empty dict
+
             self.log_message.emit(f"Successfully loaded {len(self.raw.ch_names)} channels, {self.raw.times[-1]:.2f}s duration.")
             self.finished.emit()
 
@@ -273,6 +291,45 @@ class AnalysisWorker(QObject):
             self.error_occurred.emit(f"ICA Apply Error: {str(e)}")
             traceback.print_exc()
 
+    @pyqtSlot(str, float, float)
+    def compute_erp(self, event_name: str, tmin: float, tmax: float):
+        """
+        Epochs the data around a specific event trigger and averages them to create an ERP.
+        """
+        if self.raw is None:
+            self.error_occurred.emit("No data loaded.")
+            return
+
+        if self.events is None or self.event_id is None:
+             self.error_occurred.emit("No events found in this dataset.")
+             return
+             
+        if event_name not in self.event_id:
+            self.error_occurred.emit(f"Event '{event_name}' not found.")
+            return
+
+        self.log_message.emit(f"Computing ERP for: {event_name} (tmin={tmin}, tmax={tmax})...")
+        
+        try:
+            # Select specific event ID
+            specific_event_id = {event_name: self.event_id[event_name]}
+            
+            # Create Epochs
+            # baseline=(None, 0) applies baseline correction from start of epoch to 0 (stimulus onset)
+            epochs = mne.Epochs(self.raw, self.events, event_id=specific_event_id, 
+                                tmin=tmin, tmax=tmax, baseline=(tmin, 0), preload=True, verbose=False)
+            
+            # Compute Evoked (Average)
+            evoked = epochs.average()
+            
+            self.log_message.emit(f"ERP Computed. Averaged {len(epochs)} epochs.")
+            self.erp_ready.emit(evoked)
+            self.finished.emit()
+            
+        except Exception as e:
+            self.error_occurred.emit(f"ERP Error: {str(e)}")
+            traceback.print_exc()
+
 # -----------------------------------------------------------------------------
 # UI COMPONENTS: Canvas
 # -----------------------------------------------------------------------------
@@ -299,7 +356,9 @@ class MainWindow(QMainWindow):
     # Signal sending: (High-pass/l_freq, Low-pass/h_freq, Notch)
     request_run_pipeline = pyqtSignal(float, float, float)
     request_run_ica = pyqtSignal()
+    request_run_ica = pyqtSignal()
     request_apply_ica = pyqtSignal(str)
+    request_compute_erp = pyqtSignal(str, float, float)
 
     def __init__(self):
         super().__init__()
@@ -317,13 +376,18 @@ class MainWindow(QMainWindow):
         self.worker.error_occurred.connect(self.show_error)
         self.worker.data_loaded.connect(self.on_data_loaded)
         self.worker.psd_ready.connect(self.update_plot)
+        self.worker.psd_ready.connect(self.update_plot)
         self.worker.ica_ready.connect(self.display_ica_components)
+        self.worker.events_loaded.connect(self.populate_event_dropdown)
+        self.worker.erp_ready.connect(self.handle_erp_ready)
         
         # Connect worker slots
         self.request_load_data.connect(self.worker.load_data)
         self.request_run_pipeline.connect(self.worker.run_pipeline)
         self.request_run_ica.connect(self.worker.run_ica)
+        self.request_run_ica.connect(self.worker.run_ica)
         self.request_apply_ica.connect(self.worker.apply_ica)
+        self.request_compute_erp.connect(self.worker.compute_erp)
         
         self.thread.start()
         
@@ -496,6 +560,40 @@ class MainWindow(QMainWindow):
         gb_ica.setLayout(gb_ica_layout)
         sidebar_layout.addWidget(gb_ica)
 
+        # 4. ERP Analysis Section
+        gb_erp = QGroupBox("ERP Analysis")
+        gb_erp_layout = QVBoxLayout()
+
+        gb_erp_layout.addWidget(QLabel("Select Event Trigger:"))
+        self.combo_events = QComboBox()
+        gb_erp_layout.addWidget(self.combo_events)
+
+        # Time range inputs
+        t_layout = QHBoxLayout()
+        t_layout.addWidget(QLabel("tmin:"))
+        self.spin_tmin = QDoubleSpinBox()
+        self.spin_tmin.setRange(-5.0, 5.0)
+        self.spin_tmin.setValue(-0.2)
+        self.spin_tmin.setSingleStep(0.1)
+        t_layout.addWidget(self.spin_tmin)
+        
+        t_layout.addWidget(QLabel("tmax:"))
+        self.spin_tmax = QDoubleSpinBox()
+        self.spin_tmax.setRange(-5.0, 5.0)
+        self.spin_tmax.setValue(0.5)
+        self.spin_tmax.setSingleStep(0.1)
+        t_layout.addWidget(self.spin_tmax)
+        
+        gb_erp_layout.addLayout(t_layout)
+
+        self.btn_erp = QPushButton("Compute & Plot ERP")
+        self.btn_erp.clicked.connect(self.compute_erp_click)
+        self.btn_erp.setEnabled(False) # Enable when events loaded
+        gb_erp_layout.addWidget(self.btn_erp)
+
+        gb_erp.setLayout(gb_erp_layout)
+        sidebar_layout.addWidget(gb_erp)
+
         # Spacer to push log to bottom
         sidebar_layout.addStretch()
 
@@ -503,7 +601,10 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(QLabel("Status Log:"))
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
-        self.log_area.setFixedHeight(200)
+        self.log_area = QTextEdit()
+        self.log_area.setReadOnly(True)
+        # self.log_area.setFixedHeight(200) # Remove fixed height to let it fill available space if needed, or keep small
+        self.log_area.setMinimumHeight(150) # Use min height instead
         sidebar_layout.addWidget(self.log_area)
 
         # Add Sidebar to Main
@@ -602,6 +703,35 @@ class MainWindow(QMainWindow):
     def apply_ica_click(self):
         excludes = self.input_ica_exclude.text()
         self.request_apply_ica.emit(excludes)
+
+    def populate_event_dropdown(self, event_id_dict):
+        """Populates the event dropdown with unique events found in the data."""
+        self.combo_events.clear()
+        if not event_id_dict:
+            self.log_status("No events found for ERP analysis.")
+            self.btn_erp.setEnabled(False)
+            return
+
+        self.combo_events.addItems(list(event_id_dict.keys()))
+        self.btn_erp.setEnabled(True)
+        self.log_status(f"Populated ERP dropdown with {len(event_id_dict)} events.")
+
+    def compute_erp_click(self):
+        event_name = self.combo_events.currentText()
+        if not event_name:
+            return
+        tmin = self.spin_tmin.value()
+        tmax = self.spin_tmax.value()
+        self.request_compute_erp.emit(event_name, tmin, tmax)
+
+    def handle_erp_ready(self, evoked):
+        """Plots the ERP using MNE's Butterfly plot."""
+        self.log_status("Displaying ERP Plot...")
+        try:
+            # spatial_colors=True gives a nice butterfly plot with channel location color coding
+            evoked.plot(spatial_colors=True, show=True)
+        except Exception as e:
+            self.show_error(f"Plotting Error: {e}")
 
     def display_ica_components(self, ica_solution):
         """
