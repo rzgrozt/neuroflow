@@ -57,7 +57,11 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
     ```bash
     pip install mne mne-connectivity PyQt6 PyQt6-Qt6 PyQt6-sip matplotlib numpy scipy scikit-learn
     ```
-
+   or
+   Install Dependencies
+   ```bash
+   pip install -r requirements.txt
+   ```
 ## 🖥️ Usage
 
 1.  **Run the Application:**
