@@ -21,10 +21,12 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QFileDialog, QFrame,
     QTextEdit, QMessageBox, QGroupBox, QComboBox, QDoubleSpinBox,
-    QSplitter, QSlider, QWidget, QTabWidget, QScrollArea, QToolBox, QDialog
+    QSplitter, QSlider, QWidget, QTabWidget, QScrollArea, QToolBox, QDialog,
+    QToolBar, QMenu
 )
+from PyQt6.QtGui import QAction, QIcon, QPixmap, QScreen
 from PyQt6.QtCore import (
-    Qt, QObject, QThread, pyqtSignal, pyqtSlot, QTimer
+    Qt, QObject, QThread, pyqtSignal, pyqtSlot, QTimer, QSize
 )
 
 # Configure Logging
@@ -75,12 +77,12 @@ class AnalysisWorker(QObject):
     log_message = pyqtSignal(str)
     data_loaded = pyqtSignal(object)  # Emits the MNE Raw object
     psd_ready = pyqtSignal(object, object, str)  # Emits (freqs, psd, filter_info_str)
-    psd_ready = pyqtSignal(object, object, str)  # Emits (freqs, psd, filter_info_str)
     ica_ready = pyqtSignal(object) # Emits the fitted ICA object for plotting on Main Thread
     events_loaded = pyqtSignal(dict)  # Emits event_id mapping
     erp_ready = pyqtSignal(object)    # Emits evoked object
     tfr_ready = pyqtSignal(object)    # Emits TFR object (AverageTFR)
     connectivity_ready = pyqtSignal(object) # Emits connectivity object (figure or data)
+    save_finished = pyqtSignal(str) # Emits filename when save is complete
 
     def __init__(self):
         super().__init__()
@@ -434,6 +436,29 @@ class AnalysisWorker(QObject):
             self.error_occurred.emit(f"TFR Error: {str(e)}")
             traceback.print_exc()
 
+    @pyqtSlot(str)
+    def save_data(self, filename: str):
+        """
+        Saves the CURRENT raw object to a .fif file.
+        Runs in the worker thread to avoid freezing UI.
+        """
+        if self.raw is None:
+            self.error_occurred.emit("No data to save.")
+            return
+
+        self.log_message.emit(f"Saving data to {filename}...")
+        try:
+            if not filename.endswith('.fif'):
+                filename += '.fif'
+            
+            self.raw.save(filename, overwrite=True)
+            self.save_finished.emit(filename)
+            self.log_message.emit(f"Data saved successfully to {filename}")
+
+        except Exception as e:
+            self.error_occurred.emit(f"Save Error: {str(e)}")
+            traceback.print_exc()
+
     @pyqtSlot()
     def compute_connectivity(self):
         """
@@ -687,11 +712,11 @@ class MainWindow(QMainWindow):
     # Signal sending: (High-pass/l_freq, Low-pass/h_freq, Notch)
     request_run_pipeline = pyqtSignal(float, float, float)
     request_run_ica = pyqtSignal()
-    request_run_ica = pyqtSignal()
     request_apply_ica = pyqtSignal(str)
     request_compute_erp = pyqtSignal(str, float, float)
     request_compute_tfr = pyqtSignal(str, float, float)
     request_compute_connectivity = pyqtSignal()
+    request_save_data = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -709,28 +734,92 @@ class MainWindow(QMainWindow):
         self.worker.error_occurred.connect(self.show_error)
         self.worker.data_loaded.connect(self.on_data_loaded)
         self.worker.psd_ready.connect(self.update_plot)
-        self.worker.psd_ready.connect(self.update_plot)
         self.worker.ica_ready.connect(self.display_ica_components)
         self.worker.events_loaded.connect(self.populate_event_dropdown)
         self.worker.erp_ready.connect(self.handle_erp_ready)
         self.worker.tfr_ready.connect(self.plot_tfr)
         self.worker.connectivity_ready.connect(self.plot_connectivity)
+        self.worker.save_finished.connect(self.on_save_finished)
         
         # Connect worker slots
         self.request_load_data.connect(self.worker.load_data)
         self.request_run_pipeline.connect(self.worker.run_pipeline)
         self.request_run_ica.connect(self.worker.run_ica)
-        self.request_run_ica.connect(self.worker.run_ica)
         self.request_apply_ica.connect(self.worker.apply_ica)
         self.request_compute_erp.connect(self.worker.compute_erp)
         self.request_compute_tfr.connect(self.worker.compute_tfr)
         self.request_compute_connectivity.connect(self.worker.compute_connectivity)
+        self.request_save_data.connect(self.worker.save_data)
         
         self.thread.start()
         
         # UI Setup
         self.apply_dark_theme()
         self.init_ui()
+        self.init_toolbar()
+        self.create_menu()
+
+    def init_toolbar(self):
+        """Creates the Main Toolbar."""
+        self.toolbar = QToolBar("Main Toolbar")
+        self.toolbar.setIconSize(QSize(24, 24))
+        self.addToolBar(self.toolbar)
+        
+        # Save Action
+        # Reusing standard icons or text if icons missing
+        save_action = QAction("💾 Save Clean Data", self)
+        save_action.setStatusTip("Save the processed data to .fif")
+        save_action.triggered.connect(self.on_save_clean_data)
+        self.toolbar.addAction(save_action)
+        
+        # Screenshot Action
+        screenshot_action = QAction("📷 Screenshot", self)
+        screenshot_action.setStatusTip("Take a screenshot of the application")
+        screenshot_action.triggered.connect(self.on_take_screenshot)
+        self.toolbar.addAction(screenshot_action)
+
+    def create_menu(self):
+        """Creates the Menu Bar."""
+        menu_bar = self.menuBar()
+        
+        # Help Menu
+        help_menu = menu_bar.addMenu("&Help")
+        
+        about_action = QAction("&About", self)
+        about_action.setStatusTip("Show About dialog")
+        about_action.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(about_action)
+
+    def show_about_dialog(self):
+        QMessageBox.about(self, "About NeuroFlow",
+                          "NeuroFlow v1.0\n\n"
+                          "Developed by Rüzgar Öztürk with love\n"
+                          "Powered by MNE-Python & PyQt6")
+
+    def on_save_clean_data(self):
+        if not self.worker.raw:
+            QMessageBox.warning(self, "No Data", "Please load a dataset first.")
+            return
+            
+        filename, _ = QFileDialog.getSaveFileName(self, "Save Clean Data", "", "MNE FIF (*.fif)")
+        if filename:
+            self.request_save_data.emit(filename)
+
+    def on_take_screenshot(self):
+        screen = QApplication.primaryScreen()
+        if not screen:
+            self.log_status("Error: No screen detected.")
+            return
+            
+        screenshot = screen.grabWindow(self.winId())
+        
+        filename, _ = QFileDialog.getSaveFileName(self, "Save Screenshot", "neuroflow_screenshot.png", "PNG Files (*.png);;All Files (*)")
+        if filename:
+            screenshot.save(filename)
+            self.log_status(f"Screenshot saved to {filename}")
+
+    def on_save_finished(self, filename):
+        QMessageBox.information(self, "Save Successful", f"Data saved to:\n{filename}")
 
     def apply_dark_theme(self):
         """Applies a Modern Dark Theme using QSS."""

@@ -20,6 +20,9 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
     *   **Independent Component Analysis (ICA):** Powerful artifact removal tool using FastICA to identify and exclude blinks (`EOG`) and heartbeats (`ECG`) from the data.
     *   **Event-Related Potentials (ERP):** Automatically extracts events and computes averaged evoked responses (ERP), visualized as a global "Butterfly Plot".
     *   **Spectral Analysis:** Real-time computation and visualization of **Power Spectral Density (PSD)** using Welch's method.
+    *   **File & Export:**
+        *   **Save Clean Data:** Save your processed/filtered EEG data to standard `.fif` format for future use.
+        *   **Analyst Snapshots:** One-click **Screenshot** logic to capture high-quality images of your current analysis view for reports.
     *   **Modern Accordion UI:** A sleek, properly organized sidebar using `QToolBox` to manage complex workflows efficiently.
 
 ## 🛠️ Tech Stack

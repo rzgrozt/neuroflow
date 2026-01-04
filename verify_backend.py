@@ -40,9 +40,12 @@ class SignalListener(QObject):
         self.conn_received = False
         self.worker = worker
         self.worker.tfr_ready.connect(self.on_tfr)
+        self.worker.tfr_ready.connect(self.on_tfr)
         self.worker.connectivity_ready.connect(self.on_conn)
+        self.worker.save_finished.connect(self.on_save)
         self.worker.error_occurred.connect(self.on_error)
         self.worker.log_message.connect(print)
+        self.save_received = False
 
     @pyqtSlot(object)
     def on_tfr(self, tfr):
@@ -53,6 +56,16 @@ class SignalListener(QObject):
     def on_conn(self, con):
         print("SUCCESS: Connectivity Received!")
         self.conn_received = True
+
+    @pyqtSlot(object)
+    def on_conn(self, con):
+        print("SUCCESS: Connectivity Received!")
+        self.conn_received = True
+
+    @pyqtSlot(str)
+    def on_save(self, filename):
+        print(f"SUCCESS: Save Finished! ({filename})")
+        self.save_received = True
 
     @pyqtSlot(str)
     def on_error(self, msg):
@@ -88,13 +101,21 @@ def run_tests():
     except Exception as e:
         print(f"Exception calling compute_connectivity: {e}")
 
+    # 5. Test Save
+    print("\n[TEST] Saving Data...")
+    try:
+        worker.save_data("test_dummy_save.fif")
+    except Exception as e:
+        print(f"Exception calling save_data: {e}")
+
     # Check results
-    if listener.tfr_received and listener.conn_received:
+    if listener.tfr_received and listener.conn_received and listener.save_received:
         print("\n--- PASSED: All signals received. ---")
     else:
         print("\n--- FAILED: Missing signals. ---")
         if not listener.tfr_received: print("- TFR Missing")
         if not listener.conn_received: print("- Connectivity Missing")
+        if not listener.save_received: print("- Save Missing")
 
 if __name__ == "__main__":
     from PyQt6.QtWidgets import QApplication
