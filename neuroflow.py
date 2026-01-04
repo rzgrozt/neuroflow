@@ -2,7 +2,7 @@ import sys
 import os
 import traceback
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import mne
 import numpy as np
@@ -10,11 +10,18 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
+# Optional Dependency for Connectivity
+try:
+    import mne_connectivity
+    HAS_CONNECTIVITY = True
+except ImportError:
+    HAS_CONNECTIVITY = False
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QFileDialog, QFrame,
     QTextEdit, QMessageBox, QGroupBox, QComboBox, QDoubleSpinBox,
-    QSplitter, QSlider, QWidget
+    QSplitter, QSlider, QWidget, QTabWidget, QScrollArea, QToolBox, QDialog
 )
 from PyQt6.QtCore import (
     Qt, QObject, QThread, pyqtSignal, pyqtSlot, QTimer
@@ -27,6 +34,36 @@ logger = logging.getLogger("NeuroFlow")
 # -----------------------------------------------------------------------------
 # ARCHITECTURE: AnalysisWorker (Model / Controller Logic on Thread)
 # -----------------------------------------------------------------------------
+
+class ConnectivityDialog(QDialog):
+    """
+    Popup Window for displaying Connectivity Plots.
+    Uses its own FigureCanvas to show the circular graph.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Connectivity Explorer")
+        self.resize(800, 800)
+        self.layout = QVBoxLayout(self)
+        self.canvas = None
+        
+        # Add a "Close" button at the bottom
+        self.btn_close = QPushButton("Close")
+        self.btn_close.clicked.connect(self.accept)
+        self.layout.addWidget(self.btn_close)
+
+    def plot(self, fig):
+        """Displays the given Matplotlib Figure."""
+        if self.canvas:
+            self.layout.removeWidget(self.canvas)
+            self.canvas.deleteLater()
+        
+        self.canvas = FigureCanvasQTAgg(fig)
+        self.layout.insertWidget(0, self.canvas) # Insert at top
+        
+        # Style
+        fig.patch.set_facecolor('#2b2b2b') # Dark background match
+        self.canvas.draw()
 
 class AnalysisWorker(QObject):
     """
@@ -42,6 +79,8 @@ class AnalysisWorker(QObject):
     ica_ready = pyqtSignal(object) # Emits the fitted ICA object for plotting on Main Thread
     events_loaded = pyqtSignal(dict)  # Emits event_id mapping
     erp_ready = pyqtSignal(object)    # Emits evoked object
+    tfr_ready = pyqtSignal(object)    # Emits TFR object (AverageTFR)
+    connectivity_ready = pyqtSignal(object) # Emits connectivity object (figure or data)
 
     def __init__(self):
         super().__init__()
@@ -331,6 +370,120 @@ class AnalysisWorker(QObject):
             self.error_occurred.emit(f"ERP Error: {str(e)}")
             traceback.print_exc()
 
+    @pyqtSlot(str, float, float)
+    def compute_tfr(self, ch_name: str, l_freq: float, h_freq: float, n_cycles_div: int = 2):
+        """
+        Computes Time-Frequency Representation (TFR) using Morlet wavelets.
+        Focuses on a single channel to save performance.
+        """
+        if self.raw is None:
+            self.error_occurred.emit("No data loaded.")
+            return
+
+        self.log_message.emit(f"Computing TFR for channel {ch_name} (Freqs: {l_freq}-{h_freq}Hz)...")
+        
+        try:
+            # Create frequencies array
+            freqs = np.arange(l_freq, h_freq, 1.0)
+            n_cycles = freqs / n_cycles_div
+            
+            # Use current Events if available, otherwise just use the raw data?
+            # TFR usually needs Epochs.
+            # Strategy: Create fixed length epochs if no events, OR use existing events.
+            # For simplicity and robustness given the prompt implies "Analysis", implies Event-Related (ERD/ERS).
+            # We will use the SAME events logic as ERP. If no events, we can't do ERD/ERS properly.
+            
+            if self.events is None:
+                self.error_occurred.emit("TFR requires events/epochs to visualize ERD/ERS. No events found.")
+                return
+                
+            # Pick channel
+            picks = [ch_name]
+            
+            # Epoching (Standardizing to -1s to 2s or similar, or based on user inputs? 
+            # We'll use a standard window for "Advanced Analysis" or reuse ERP params?
+            # Let's use a standard wide window for TFR to see baseline.
+            tmin, tmax = -1.0, 2.0 
+            
+            # Create Epochs (All events combined or specific? usually we want specific)
+            # For MVP, we'll use "All Events" or just the first event type to show *something*.
+            # Or better: Just use the first event ID found if multiple.
+            event_id_to_use = None
+            if self.event_id:
+                # Pick first key
+                first_key = list(self.event_id.keys())[0]
+                event_id_to_use = {first_key: self.event_id[first_key]}
+            
+            epochs = mne.Epochs(self.raw, self.events, event_id=event_id_to_use, 
+                                tmin=tmin, tmax=tmax, picks=picks,
+                                baseline=(tmin, 0), preload=True, verbose=False)
+            
+            # Subtract evoked response (optional, but good for induced power)
+            # epochs.subtract_evoked() 
+            
+            # Run Morlet
+            power = mne.time_frequency.tfr_morlet(
+                epochs, n_cycles=n_cycles, return_itc=False,
+                freqs=freqs, average=True, verbose=False
+            )
+            
+            self.tfr_ready.emit(power)
+            self.finished.emit()
+            
+        except Exception as e:
+            self.error_occurred.emit(f"TFR Error: {str(e)}")
+            traceback.print_exc()
+
+    @pyqtSlot()
+    def compute_connectivity(self):
+        """
+        Computes Functional Connectivity using wPLI (Weighted Phase Lag Index).
+        Targeting Alpha Band (8-12Hz) by default for MVP.
+        """
+        if self.raw is None:
+            self.error_occurred.emit("No data loaded.")
+            return
+
+        if not HAS_CONNECTIVITY:
+             self.error_occurred.emit("mne-connectivity not installed. pip install mne-connectivity")
+             return
+
+        self.log_message.emit("Computing Alpha Band Connectivity (wPLI)...")
+        
+        try:
+            # Connectivity usually requires epochs.
+            # Strategy: If events exist, use them. If not, make fixed length epochs.
+            # We use 4s epochs to get decent frequency resolution for 8-12Hz.
+            tmin, tmax = 0, 4.0 
+            
+            if self.events is not None:
+                 # Use existing events if available
+                 epochs = mne.Epochs(self.raw, self.events, event_id=None, tmin=tmin, tmax=tmax, 
+                                     baseline=None, preload=True, verbose=False)
+            else:
+                 # Fallback to fixed length epochs
+                 epochs = mne.make_fixed_length_epochs(self.raw, duration=4.0, preload=True, verbose=False)
+
+            # Compute Connectivity
+            # fmin=8, fmax=12 for Alpha
+            fmin, fmax = 8.0, 12.0
+            sfreq = self.raw.info['sfreq']
+            
+            # Compute wPLI
+            con = mne_connectivity.spectral_connectivity_epochs(
+                epochs, method='wpli', mode='multitaper', sfreq=sfreq,
+                fmin=fmin, fmax=fmax, faverage=True, mt_adaptive=True, n_jobs=1, verbose=False
+            )
+            
+            # Emit result
+            self.connectivity_ready.emit(con)
+            self.finished.emit()
+            self.log_message.emit("Connectivity Computation Complete.")
+
+        except Exception as e:
+            self.error_occurred.emit(f"Connectivity Error: {str(e)}")
+            traceback.print_exc()
+
 # -----------------------------------------------------------------------------
 # UI COMPONENTS: ERP Viewer Window
 # -----------------------------------------------------------------------------
@@ -537,11 +690,13 @@ class MainWindow(QMainWindow):
     request_run_ica = pyqtSignal()
     request_apply_ica = pyqtSignal(str)
     request_compute_erp = pyqtSignal(str, float, float)
+    request_compute_tfr = pyqtSignal(str, float, float)
+    request_compute_connectivity = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("NeuroFlow - Professional EEG Analysis")
-        self.resize(1200, 800)
+        self.resize(1300, 850)
         self.raw_data = None # Store reference to plot sensors logic
         
         # Initialize Threading
@@ -558,6 +713,8 @@ class MainWindow(QMainWindow):
         self.worker.ica_ready.connect(self.display_ica_components)
         self.worker.events_loaded.connect(self.populate_event_dropdown)
         self.worker.erp_ready.connect(self.handle_erp_ready)
+        self.worker.tfr_ready.connect(self.plot_tfr)
+        self.worker.connectivity_ready.connect(self.plot_connectivity)
         
         # Connect worker slots
         self.request_load_data.connect(self.worker.load_data)
@@ -566,6 +723,8 @@ class MainWindow(QMainWindow):
         self.request_run_ica.connect(self.worker.run_ica)
         self.request_apply_ica.connect(self.worker.apply_ica)
         self.request_compute_erp.connect(self.worker.compute_erp)
+        self.request_compute_tfr.connect(self.worker.compute_tfr)
+        self.request_compute_connectivity.connect(self.worker.compute_connectivity)
         
         self.thread.start()
         
@@ -630,6 +789,19 @@ class MainWindow(QMainWindow):
         QLabel {
             color: #cccccc;
         }
+        QToolBox::tab {
+            background-color: #383838;
+            border: 1px solid #444;
+            color: #f0f0f0;
+            font-weight: bold;
+            padding: 5px;
+            border-radius: 4px;
+        }
+        QToolBox::tab:selected {
+            background-color: #444444;
+            color: #007acc;
+            border-bottom: 2px solid #007acc;
+        }
         """
         self.setStyleSheet(qss)
 
@@ -641,139 +813,189 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(10)
 
         # ----------------------
-        # LEFT SIDEBAR
+        # LEFT SIDEBAR : Modern Accordion
         # ----------------------
         sidebar = QFrame()
         sidebar.setFrameShape(QFrame.Shape.StyledPanel)
-        sidebar.setFixedWidth(320)
+        sidebar.setFixedWidth(350) # Increased width slightly for comfort
         sidebar.setStyleSheet("background-color: #252526; border-radius: 8px;")
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setSpacing(15)
+        sidebar_layout.setSpacing(10)
 
         # Title
         title_label = QLabel("NeuroFlow")
-        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #007acc; margin-bottom: 10px;")
+        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #007acc; margin-bottom: 5px;")
         sidebar_layout.addWidget(title_label)
-
-        # 1. Data Loading Section
-        gb_data = QGroupBox("Dataset")
-        gb_data_layout = QVBoxLayout()
         
+        # ToolBox Setup
+        self.toolbox = QToolBox()
+        
+        # --- PAGE 1: Data & Preprocessing ---
+        page_data = QWidget()
+        layout_data = QVBoxLayout(page_data)
+        layout_data.setSpacing(15)
+        layout_data.setContentsMargins(10, 15, 10, 10)
+        
+        # Dataset controls
+        gb_d = QGroupBox("Dataset")
+        l_d = QVBoxLayout()
+        l_d.setSpacing(8)
         self.btn_load = QPushButton("Load EEG Data")
-        self.btn_load.setToolTip("Supports .vhdr (BrainVision), .fif, .edf")
         self.btn_load.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_load.clicked.connect(self.browse_file)
         
-        # New "Check Sensors" Button
         self.btn_sensors = QPushButton("📍 Check Sensors")
-        self.btn_sensors.setToolTip("View 2D Topomap of sensor positions")
         self.btn_sensors.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_sensors.setEnabled(False) # Disabled until data loads
+        self.btn_sensors.setEnabled(False)
         self.btn_sensors.clicked.connect(self.check_sensors)
-
-        gb_data_layout.addWidget(self.btn_load)
-        gb_data_layout.addWidget(self.btn_sensors)
-        gb_data.setLayout(gb_data_layout)
-        sidebar_layout.addWidget(gb_data)
-
-        # 2. Preprocessing Section
-        gb_proc = QGroupBox("Preprocessing Pipeline")
-        gb_proc_layout = QVBoxLayout()
-
-        # High Pass
+        
+        l_d.addWidget(self.btn_load)
+        l_d.addWidget(self.btn_sensors)
+        gb_d.setLayout(l_d)
+        layout_data.addWidget(gb_d)
+        
+        # Pipeline controls
+        gb_p = QGroupBox("Signal Pipeline")
+        l_p = QVBoxLayout()
+        l_p.setSpacing(8)
+        
         h_layout = QHBoxLayout()
-        h_layout.addWidget(QLabel("High-pass (Hz):"))
+        h_layout.addWidget(QLabel("HP (Hz):"))
         self.input_hp = QLineEdit("1.0")
         h_layout.addWidget(self.input_hp)
-        gb_proc_layout.addLayout(h_layout)
+        l_p.addLayout(h_layout)
 
-        # Low Pass
         l_layout = QHBoxLayout()
-        l_layout.addWidget(QLabel("Low-pass (Hz):"))
+        l_layout.addWidget(QLabel("LP (Hz):"))
         self.input_lp = QLineEdit("40.0")
         l_layout.addWidget(self.input_lp)
-        gb_proc_layout.addLayout(l_layout)
+        l_p.addLayout(l_layout)
 
-        # Notch
         n_layout = QHBoxLayout()
-        n_layout.addWidget(QLabel("Notch (Hz):"))
+        n_layout.addWidget(QLabel("Notch:"))
         self.input_notch = QLineEdit("50.0")
         n_layout.addWidget(self.input_notch)
-        gb_proc_layout.addLayout(n_layout)
-
+        l_p.addLayout(n_layout)
+        
         self.btn_run = QPushButton("Run Pipeline")
         self.btn_run.setStyleSheet("background-color: #007acc; font-weight: bold;")
         self.btn_run.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_run.clicked.connect(self.launch_pipeline)
         self.btn_run.setEnabled(False)
+        l_p.addWidget(self.btn_run)
+        gb_p.setLayout(l_p)
+        layout_data.addWidget(gb_p)
         
-        gb_proc_layout.addSpacing(10)
-        gb_proc_layout.addWidget(self.btn_run)
+        layout_data.addStretch() # Push up
+        self.toolbox.addItem(page_data, "📡 Data & Preprocessing")
         
-        gb_proc.setLayout(gb_proc_layout)
-        sidebar_layout.addWidget(gb_proc)
-
-        # 3. ICA Section
-        gb_ica = QGroupBox("ICA Artifact Removal")
-        gb_ica_layout = QVBoxLayout()
+        # --- PAGE 2: Artifact Removal (ICA) ---
+        page_ica = QWidget()
+        layout_ica = QVBoxLayout(page_ica)
+        layout_ica.setSpacing(15)
+        layout_ica.setContentsMargins(10, 15, 10, 10)
+        
+        gb_ica_inner = QGroupBox("Independent Component Analysis")
+        l_ica = QVBoxLayout()
+        l_ica.setSpacing(10)
         
         self.btn_calc_ica = QPushButton("1. Calculate ICA")
-        self.btn_calc_ica.setToolTip("Fit ICA and show component maps")
         self.btn_calc_ica.clicked.connect(self.run_ica_click)
         self.btn_calc_ica.setEnabled(False)
         
-        l_ica = QLabel("Exclude Components (IDs):")
+        l_exclude = QLabel("Exclude Components (IDs):")
         self.input_ica_exclude = QLineEdit()
-        self.input_ica_exclude.setPlaceholderText("e.g. 0, 2")
+        self.input_ica_exclude.setPlaceholderText("e.g. 0, 2 (comma separated)")
         
-        self.btn_apply_ica = QPushButton("2. Apply ICA & Re-plot")
+        self.btn_apply_ica = QPushButton("2. Apply ICA")
         self.btn_apply_ica.clicked.connect(self.apply_ica_click)
-        self.btn_apply_ica.setEnabled(False) # Enabled after Calc? Or just always allow checking
+        self.btn_apply_ica.setEnabled(False)
         
-        gb_ica_layout.addWidget(self.btn_calc_ica)
-        gb_ica_layout.addWidget(l_ica)
-        gb_ica_layout.addWidget(self.input_ica_exclude)
-        gb_ica_layout.addWidget(self.btn_apply_ica)
+        l_ica.addWidget(self.btn_calc_ica)
+        l_ica.addWidget(l_exclude)
+        l_ica.addWidget(self.input_ica_exclude)
+        l_ica.addWidget(self.btn_apply_ica)
+        gb_ica_inner.setLayout(l_ica)
         
-        gb_ica.setLayout(gb_ica_layout)
-        sidebar_layout.addWidget(gb_ica)
-
-        # 4. ERP Analysis Section
-        gb_erp = QGroupBox("ERP Analysis")
-        gb_erp_layout = QVBoxLayout()
-
-        gb_erp_layout.addWidget(QLabel("Select Event Trigger:"))
+        layout_ica.addWidget(gb_ica_inner)
+        layout_ica.addStretch()
+        self.toolbox.addItem(page_ica, "👁️ Artifact Removal (ICA)")
+        
+        # --- PAGE 3: ERP ANALYSIS ---
+        page_erp = QWidget()
+        layout_erp = QVBoxLayout(page_erp)
+        layout_erp.setSpacing(15)
+        layout_erp.setContentsMargins(10, 15, 10, 10)
+        
+        gb_erp_inner = QGroupBox("Event-Related Potentials")
+        l_erp = QVBoxLayout()
+        l_erp.setSpacing(10)
+        
+        l_erp.addWidget(QLabel("Trigger Event:"))
         self.combo_events = QComboBox()
-        gb_erp_layout.addWidget(self.combo_events)
-
-        # Time range inputs
-        t_layout = QHBoxLayout()
-        t_layout.addWidget(QLabel("tmin:"))
+        l_erp.addWidget(self.combo_events)
+        
+        t_row = QHBoxLayout()
         self.spin_tmin = QDoubleSpinBox()
-        self.spin_tmin.setRange(-5.0, 5.0)
-        self.spin_tmin.setValue(-0.2)
-        self.spin_tmin.setSingleStep(0.1)
-        t_layout.addWidget(self.spin_tmin)
-        
-        t_layout.addWidget(QLabel("tmax:"))
+        self.spin_tmin.setRange(-5, 5); self.spin_tmin.setValue(-0.2)
         self.spin_tmax = QDoubleSpinBox()
-        self.spin_tmax.setRange(-5.0, 5.0)
-        self.spin_tmax.setValue(0.5)
-        self.spin_tmax.setSingleStep(0.1)
-        t_layout.addWidget(self.spin_tmax)
+        self.spin_tmax.setRange(-5, 5); self.spin_tmax.setValue(0.5)
+        t_row.addWidget(QLabel("tmin:")); t_row.addWidget(self.spin_tmin)
+        t_row.addWidget(QLabel("tmax:")); t_row.addWidget(self.spin_tmax)
+        l_erp.addLayout(t_row)
         
-        gb_erp_layout.addLayout(t_layout)
-
         self.btn_erp = QPushButton("Compute & Plot ERP")
         self.btn_erp.clicked.connect(self.compute_erp_click)
-        self.btn_erp.setEnabled(False) # Enable when events loaded
-        gb_erp_layout.addWidget(self.btn_erp)
+        self.btn_erp.setEnabled(False)
+        l_erp.addWidget(self.btn_erp)
+        
+        gb_erp_inner.setLayout(l_erp)
+        layout_erp.addWidget(gb_erp_inner)
+        layout_erp.addStretch()
+        self.toolbox.addItem(page_erp, "⚡ ERP Analysis")
+        
+        # --- PAGE 4: ADVANCED ANALYSIS ---
+        page_adv = QWidget()
+        layout_adv = QVBoxLayout(page_adv)
+        layout_adv.setSpacing(15)
+        layout_adv.setContentsMargins(10, 15, 10, 10)
+        
+        gb_tfr = QGroupBox("Time-Frequency (TFR)")
+        l_tfr = QVBoxLayout()
+        l_tfr.setSpacing(8)
+        
+        l_tfr.addWidget(QLabel("Channel:"))
+        self.combo_channels = QComboBox()
+        l_tfr.addWidget(self.combo_channels)
+        
+        f_row = QHBoxLayout()
+        self.spin_tfr_l = QDoubleSpinBox(); self.spin_tfr_l.setValue(4.0)
+        self.spin_tfr_h = QDoubleSpinBox(); self.spin_tfr_h.setValue(30.0)
+        f_row.addWidget(QLabel("Freqs:")); f_row.addWidget(self.spin_tfr_l)
+        f_row.addWidget(QLabel("-")); f_row.addWidget(self.spin_tfr_h)
+        l_tfr.addLayout(f_row)
+        
+        self.btn_tfr = QPushButton("Compute TFR")
+        self.btn_tfr.clicked.connect(self.compute_tfr_click)
+        self.btn_tfr.setEnabled(False)
+        l_tfr.addWidget(self.btn_tfr)
+        gb_tfr.setLayout(l_tfr)
+        layout_adv.addWidget(gb_tfr)
+        
+        gb_conn = QGroupBox("Connectivity (wPLI)")
+        l_conn = QVBoxLayout()
+        self.btn_conn = QPushButton("Alpha Band (8-12Hz)")
+        self.btn_conn.clicked.connect(self.compute_connectivity_click)
+        self.btn_conn.setEnabled(False)
+        l_conn.addWidget(self.btn_conn)
+        gb_conn.setLayout(l_conn)
+        layout_adv.addWidget(gb_conn)
+        
+        layout_adv.addStretch()
+        self.toolbox.addItem(page_adv, "🧠 Advanced Analysis")
 
-        gb_erp.setLayout(gb_erp_layout)
-        sidebar_layout.addWidget(gb_erp)
-
-        # Spacer to push log to bottom
-        sidebar_layout.addStretch()
+        # Add ToolBox to sidebar layout
+        sidebar_layout.addWidget(self.toolbox)
 
         # 3. Logs
         sidebar_layout.addWidget(QLabel("Status Log:"))
@@ -789,25 +1011,41 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(sidebar)
 
         # ----------------------
-        # MAIN CONTENT AREA
+        # MAIN CONTENT AREA (Tabs)
         # ----------------------
-        content_frame = QFrame()
-        content_frame.setStyleSheet("background-color: #1e1e1e; border-radius: 8px;")
-        content_layout = QVBoxLayout(content_frame)
-
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet("QTabWidget::pane { border: 0; }")
+        
+        # TAB 1: Signal Monitor
+        self.tab_signal = QWidget()
+        tab1_layout = QVBoxLayout(self.tab_signal)
+        tab1_layout.setContentsMargins(0,0,0,0)
+        
         self.canvas = MplCanvas(self, width=5, height=4, dpi=100)
-        content_layout.addWidget(self.canvas)
-
+        tab1_layout.addWidget(self.canvas)
+        
         # Initial plot placeholder
         self.canvas.axes.text(0.5, 0.5, 'NeuroFlow Ready\nLoad BrainVision (.vhdr) or others\nto begin analysis', 
                               color='gray', ha='center', va='center', fontsize=12)
         self.canvas.draw()
+        
+        self.tabs.addTab(self.tab_signal, "Signal Monitor")
+        
+        # TAB 2: Advanced Analysis
+        self.tab_advanced = QWidget()
+        self.tab2_layout = QVBoxLayout(self.tab_advanced) # Keep reference to replace canvas
+        self.tab2_layout.setContentsMargins(0,0,0,0)
+        
+        self.canvas_advanced = MplCanvas(self, width=5, height=4, dpi=100)
+        self.tab2_layout.addWidget(self.canvas_advanced)
+        
+        self.tabs.addTab(self.tab_advanced, "Advanced Analysis")
 
-        main_layout.addWidget(content_frame)
+        main_layout.addWidget(self.tabs)
         
         # Stretch factors
         main_layout.setStretch(0, 1)
-        main_layout.setStretch(1, 3)
+        main_layout.setStretch(1, 4)
 
     # -------------------------------------------------------------------------
     # UI Interactions
@@ -843,6 +1081,13 @@ class MainWindow(QMainWindow):
         self.btn_sensors.setEnabled(True)
         self.btn_calc_ica.setEnabled(True) # Enable ICA
         self.btn_apply_ica.setEnabled(True)
+        
+        # Populate Channels for TFR
+        self.combo_channels.clear()
+        self.combo_channels.addItems(self.raw_data.ch_names)
+        self.btn_tfr.setEnabled(True)
+        self.btn_conn.setEnabled(True)
+        
         QMessageBox.information(self, "Success", "EEG Data Loaded Successfully.")
 
     def check_sensors(self):
@@ -924,6 +1169,89 @@ class MainWindow(QMainWindow):
              ica_solution.plot_components(show=True)
         except Exception as e:
             self.show_error(f"Plotting Error: {e}")
+
+    # -------------------------------------------------------------------------
+    # Advanced Analysis Slots
+    # -------------------------------------------------------------------------
+
+    def compute_tfr_click(self):
+        ch = self.combo_channels.currentText()
+        if not ch: return
+        l_freq = self.spin_tfr_l.value()
+        h_freq = self.spin_tfr_h.value()
+        self.request_compute_tfr.emit(ch, l_freq, h_freq)
+        self.tabs.setCurrentWidget(self.tab_advanced)
+
+    def plot_tfr(self, tfr_power):
+        """Plots TFR Heatmap on the Advanced Canvas."""
+        self.canvas_advanced.axes.clear()
+        self.canvas_advanced.axes.set_facecolor('black')
+        
+        try:
+            data = tfr_power.data[0] # Single channel
+            times = tfr_power.times
+            freqs = tfr_power.freqs
+            
+            # Simple Spectrogram Plot
+            # Gouraud shading for smoothness
+            im = self.canvas_advanced.axes.pcolormesh(times, freqs, data, shading='gouraud', cmap='viridis')
+            
+            self.canvas_advanced.axes.set_title(f"Time-Frequency: {tfr_power.ch_names[0]}", color='white')
+            self.canvas_advanced.axes.set_xlabel("Time (s)", color='white')
+            self.canvas_advanced.axes.set_ylabel("Frequency (Hz)", color='white')
+            self.canvas_advanced.axes.tick_params(colors='white')
+            
+            self.canvas_advanced.draw()
+            self.log_status("TFR Plot Updated.")
+            
+        except Exception as e:
+            self.show_error(f"TFR Plot Error: {e}")
+
+    def compute_connectivity_click(self):
+        # Trigger connectivity (Alpha band 8-12Hz)
+        if hasattr(self, 'btn_conn'):
+            self.request_compute_connectivity.emit()
+            self.tabs.setCurrentWidget(self.tab_advanced)
+
+    def plot_connectivity(self, con):
+        """
+        Visualizes connectivity using mne_connectivity.viz.plot_connectivity_circle.
+        Uses a Popup Dialog to display the result.
+        """
+        self.log_status("Connectivity Calculated. Visualizing...")
+        
+        try:
+            from mne_connectivity.viz import plot_connectivity_circle
+        except ImportError:
+            self.show_error("mne_connectivity not found.")
+            return
+
+        try:
+            # Extract data
+            con_data = con.get_data(output='dense') 
+            
+            # Handling dimensions
+            if con_data.ndim == 3:
+                con_data = con_data[:, :, 0] # Squeeze freq dimension if 1
+            
+            node_names = self.raw_data.ch_names
+            
+            # Create Figure with show=False to prevent immediate popup
+            # plot_connectivity_circle returns fig, ax
+            fig, ax = plot_connectivity_circle(con_data, node_names, n_lines=50, 
+                                             fontsize_names=8, title='Alpha Band Connectivity (wPLI)',
+                                             show=False)
+            
+            # Launch Popup Dialog
+            self.connectivity_dialog = ConnectivityDialog(self)
+            self.connectivity_dialog.plot(fig)
+            self.connectivity_dialog.show()
+            
+            self.log_status("Connectivity Explorer Opened.")
+            
+        except Exception as e:
+             self.show_error(f"Connectivity Plot Error: {e}")
+             traceback.print_exc()
 
     def update_plot(self, freqs, psd_mean, filter_info_str):
         """Updates the Matplotlib canvas with the new PSD data."""

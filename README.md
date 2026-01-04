@@ -6,23 +6,28 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
 
 ## 🚀 Key Features
 
-*   **Multi-Format Data Loading:** Support for **BrainVision (.vhdr)**, **.fif**, and **.edf** EEG datasets.
-*   **Robust Montage Handling:** Automatically detects missing channel locations (common in vhdr) and applies a standard '10-20' montage for consistent analysis.
-*   **Interactive Topomap:** "**Check Sensors**" feature to visualize electrode positions 2D topographically to verify channel mapping.
-*   **Preprocessing Pipeline:**
-    *   **High-Pass Filter:** Remove slow drifts and DC offsets.
-    *   **Low-Pass Filter:** Eliminate high-frequency noise.
-    *   **Notch Filter:** Suppress line noise (50/60 Hz).
-*   **Independent Component Analysis (ICA):** Powerful artifact removal tool using FastICA to identify and exclude blinks (`EOG`) and heartbeats (`ECG`) from the data.
-*   **Event-Related Potentials (ERP):** Automatically extracts events and computes averaged evoked responses (ERP), visualized as a global "Butterfly Plot".
-*   **Spectral Analysis:** Real-time computation and visualization of **Power Spectral Density (PSD)** using Welch's method.
-*   **Modern Dark UI:** A sleek, VS Code-inspired dark theme optimized for long research sessions.
+*   **Key Features:**
+    *   **Advanced Spectral Analysis:**
+        *   **Time-Frequency Representation (TFR):** Visualize global or channel-specific oscillatory power changes over time (Morlet Wavelets).
+        *   **Functional Connectivity:** Compute and visualize brain network interactions using **Weighted Phase Lag Index (wPLI)** (Alpha band).
+    *   **Multi-Format Data Loading:** Support for **BrainVision (.vhdr)**, **.fif**, and **.edf** EEG datasets.
+    *   **Robust Montage Handling:** Automatically detects missing channel locations (common in vhdr) and applies a standard '10-20' montage for consistent analysis.
+    *   **Interactive Topomap:** "**Check Sensors**" feature to visualize electrode positions 2D topographically to verify channel mapping.
+    *   **Preprocessing Pipeline:**
+        *   **High-Pass Filter:** Remove slow drifts and DC offsets.
+        *   **Low-Pass Filter:** Eliminate high-frequency noise.
+        *   **Notch Filter:** Suppress line noise (50/60 Hz).
+    *   **Independent Component Analysis (ICA):** Powerful artifact removal tool using FastICA to identify and exclude blinks (`EOG`) and heartbeats (`ECG`) from the data.
+    *   **Event-Related Potentials (ERP):** Automatically extracts events and computes averaged evoked responses (ERP), visualized as a global "Butterfly Plot".
+    *   **Spectral Analysis:** Real-time computation and visualization of **Power Spectral Density (PSD)** using Welch's method.
+    *   **Modern Accordion UI:** A sleek, properly organized sidebar using `QToolBox` to manage complex workflows efficiently.
 
 ## 🛠️ Tech Stack
 
 *   **Language:** Python 3.10+
 *   **GUI:** PyQt6 (Qt Widgets, Signals & Slots)
 *   **Backend:** MNE-Python (Neuroscience/EEG Analysis)
+*   **Connectivity:** `mne-connectivity`
 *   **Numerical:** NumPy, SciPy
 *   **Plotting:** Matplotlib (integrated via FigureCanvasQTAgg)
 *   **Concurrency:** `QThread` + `QObject` Worker Pattern
@@ -31,7 +36,7 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/StartYourFork/neuroflow.git
+    git clone https://github.com/rzgrozt/neuroflow.git
     cd neuroflow
     ```
 
@@ -43,7 +48,7 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
 
 3.  **Install dependencies:**
     ```bash
-    pip install mne PyQt6 PyQt6-Qt6 PyQt6-sip matplotlib numpy scipy scikit-learn
+    pip install mne mne-connectivity PyQt6 PyQt6-Qt6 PyQt6-sip matplotlib numpy scipy scikit-learn
     ```
 
 ## 🖥️ Usage
@@ -54,18 +59,20 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
     ```
 
 2.  **Workflow:**
-    *   **Load Data:** Click `Load EEG Data` and select your file (e.g., `subject_01.vhdr`).
+    *   **Load Data (Data & Preprocessing):** Click `Load EEG Data` and select your file (e.g., `subject_01.vhdr`).
     *   **Verify Sensors:** Click `📍 Check Sensors` to ensure your channels are mapped correctly.
     *   **Set Filters:** Input your desired High-pass, Low-pass, and Notch frequencies (default: 1.0 - 40.0 Hz, Notch 50.0 Hz).
-    *   **ICA Artifact Removal:**
+    *   **ICA Artifact Removal (Page 2):**
         *   Click `Calculate ICA` to decompose the signal into independent components.
         *   Inspect the topomaps in the popup window. Identify blink/heartbeat artifacts (e.g., Component 0).
         *   Enter the ID (e.g., `0`) in the "Exclude" box and click `Apply ICA`. The PSD plot will update to show the cleaned signal.
-    *   **ERP Analysis:**
+    *   **ERP Analysis (Page 3):**
         *   Select a stimulus trigger from the "Select Event Trigger" dropdown (auto-populated).
         *   Set your epoch window (e.g., `tmin: -0.2`, `tmax: 0.5`).
-        *   Click `Compute & Plot ERP` to view the averaged evoked response (Butterfly Plot).
-    *   **Process:** Click `Run Pipeline`. The PSD plot on the right will update to show the frequency power distribution of your processed data.
+        *   Click `Compute & Plot ERP` to view the averaged evoked response (Butterfly Plot) in a dedicated interactive viewer.
+    *   **Advanced Analysis (Page 4):**
+        *   **TFR:** Select a channel and click `Compute TFR` to see the Time-Frequency heatmap.
+        *   **Connectivity:** Click `Alpha Band (8-12Hz)` to launch the **Connectivity Explorer** popup and visualize the functional brain network.
 
 ## 📂 Architecture
 
