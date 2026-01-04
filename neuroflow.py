@@ -37,10 +37,12 @@ class AnalysisWorker(QObject):
     log_message = pyqtSignal(str)
     data_loaded = pyqtSignal(object)  # Emits the MNE Raw object
     psd_ready = pyqtSignal(object, object, str)  # Emits (freqs, psd, filter_info_str)
+    ica_ready = pyqtSignal(object) # Emits the fitted ICA object for plotting on Main Thread
 
     def __init__(self):
         super().__init__()
         self.raw = None  # Holds the MNE Raw object
+        self.ica = None  # Holds the fitted ICA object
 
     @pyqtSlot(str)
     def load_data(self, file_path: str):
@@ -64,7 +66,23 @@ class AnalysisWorker(QObject):
                 self.error_occurred.emit(f"Unsupported format: {filename}. Please use .vhdr, .fif, or .edf")
                 return
 
-            # 2. Neuroscience Logic: Standardizing Electrode Positions
+
+            # 2. Auto-Detect & Set Channel Types (EOG/ECG)
+            # This must be done BEFORE setting the montage to avoid "overlapping positions" errors
+            # if EOG/EEG sensors map to the same default location.
+            ch_types = {}
+            for ch_name in self.raw.ch_names:
+                name_lower = ch_name.lower()
+                if any(x in name_lower for x in ['eog', 'heog', 'veog']):
+                    ch_types[ch_name] = 'eog'
+                elif any(x in name_lower for x in ['ecg', 'ekg']):
+                    ch_types[ch_name] = 'ecg'
+            
+            if ch_types:
+                self.log_message.emit(f"Setting channel types: {ch_types}")
+                self.raw.set_channel_types(ch_types)
+
+            # 3. Neuroscience Logic: Standardizing Electrode Positions
             # BrainVision and other raw formats often lack 3D sensor locations.
             # We strictly check if montage is missing before setting a standard one.
             if self.raw.get_montage() is None:
@@ -148,7 +166,112 @@ class AnalysisWorker(QObject):
         except Exception as e:
             self.error_occurred.emit(f"Pipeline Error: {str(e)}")
             traceback.print_exc()
+    @pyqtSlot()
+    def run_ica(self):
+        """
+        Fits ICA on the CURRENTLY filtered data (or raw if no filter).
+        Use standard settings: n_components=15, method='fastica'.
+        """
+        if self.raw is None:
+            self.error_occurred.emit("No data loaded. Cannot run ICA.")
+            return
 
+        self.log_message.emit("Fitting ICA (n_components=15, fastica)... This may take a moment.")
+        
+        try:
+            # We usually recommend 1Hz high-pass for ICA. 
+            # We will use self.raw. In a real app, we should ensure self.raw is filtered.
+            # Here we assume the user has run the pipeline or we assume raw is OK.
+            # Important: fitting on a copy to be safe, though ICA fit doesn't alter data inplace unless asked?
+            # MNE ICA fit takes a Raw object.
+            
+            # Create ICA object
+            self.ica = mne.preprocessing.ICA(n_components=15, method='fastica', random_state=97, max_iter='auto')
+            
+            # Fit on a copy of data (MNE recommends high-pass filtered data for fitting)
+            # We'll validly assume the user might have filtered 'self.raw' in place? 
+            # Wait, 'run_pipeline' operates on 'self.raw.copy()'. 'self.raw' is always the ORIGINAL raw loaded.
+            # NOTE: Ideally ICA should be fitted on the *filtered* data. 
+            # TO FIX: The 'run_pipeline' method currently DOES NOT update 'self.raw', it creates 'result_raw'.
+            # If we want to support the workflow "Filter -> ICA", we need to store the filtered result or allow fitting on raw.
+            # Given the USER REQUEST: "Ensure ICA is only run after the data is loaded and filtered (High-pass > 1Hz is recommended for ICA)."
+            # We don't have a persistent "filtered" object in the current class design (it was 'result_raw').
+            # COMPROMISE: We will Fit on 'self.raw' but Warn the user, OR (better) we should have stored the filtered version.
+            # Let's modify 'run_pipeline' to Update 'self.current_processed_raw' or similar?
+            # Or just fit on self.raw for MVP and rely on user to have filtered?
+            # Wait, if 'run_pipeline' just emits PSD and doesn't save the filtered raw, we can't fit ICA on it!
+            # Let's filter a temporary copy here for fitting if needed, or assume self.raw is what we use.
+            # Re-reading: "Ensure ICA is only run after the data is loaded and filtered"
+            # -> This implies we NEED the filtered data.
+            # Let's change this to: Fit on a COPY of self.raw that we apply a 1Hz HP filter to specifically for ICA fitting, 
+            # OR we change architecture to store processed data.
+            # Best approach for MVP integrity: Apply a 1Hz High-pass strictly for the ICA fit here.
+            
+            raw_for_ica = self.raw.copy()
+            # Apply 1.0Hz Highpass for stable ICA if not already done? 
+            # The prompt says "Ensure... High-pass > 1Hz is recommended". 
+            # We'll just filter this copy to be safe.
+            raw_for_ica.filter(l_freq=1.0, h_freq=None, verbose=False) 
+            
+            self.ica.fit(raw_for_ica, verbose=False)
+            self.log_message.emit("ICA Fit Complete. Emitting signal to plot components...")
+            
+            # Plot components immediately
+            # self.ica.plot_components(show=True) -> MOVED TO MAIN THREAD
+            self.ica_ready.emit(self.ica)
+            self.finished.emit()
+
+        except Exception as e:
+            self.error_occurred.emit(f"ICA Fit Error: {str(e)}")
+            traceback.print_exc()
+
+    @pyqtSlot(str)
+    def apply_ica(self, exclude_str: str):
+        """
+        Apply ICA with excluded components and re-compute PSD.
+        """
+        if self.ica is None:
+            self.error_occurred.emit("ICA has not been calculated yet.")
+            return
+            
+        try:
+            # Parse excludes
+            if not exclude_str.strip():
+                excludes = []
+            else:
+                excludes = [int(x.strip()) for x in exclude_str.split(',') if x.strip().isdigit()]
+            
+            self.log_message.emit(f"Applying ICA exclusion: {excludes}")
+            self.ica.exclude = excludes
+            
+            # Apply to a COPY of raw
+            # We want to show the Cleaner signal PSD.
+            # So: Raw -> Apply ICA -> Compute PSD
+            
+            clean_raw = self.raw.copy()
+            self.ica.apply(clean_raw)
+            
+            # Now we compute PSD on this clean_raw
+            # We should probably apply the SAME High/Low pass filters the user had?
+            # We don't know what they were unless we store them. 
+            # For this 'Apply ICA' step, let's just show the PSD of the ICA-cleaned raw (maybe just 1-40Hz default or raw).
+            # To be consistent, let's just do a quick PSD of the cleaned data.
+            # Better: Apply default filters (1-40) to look nice? Or just raw.
+            # Let's just do Raw -> ICA -> PSD (0-100Hz).
+            
+            self.log_message.emit(f"Computing PSD on ICA-cleaned data...")
+            spectrum = clean_raw.compute_psd(fmax=100)
+            psds, freqs = spectrum.get_data(return_freqs=True)
+            psd_mean = psds.mean(axis=0)
+            
+            self.psd_ready.emit(freqs, psd_mean, f"ICA Cleaned | Excl: {excludes}")
+            self.finished.emit()
+            
+        except ValueError:
+             self.error_occurred.emit("Invalid format for components. Use '0, 1, 2'")
+        except Exception as e:
+            self.error_occurred.emit(f"ICA Apply Error: {str(e)}")
+            traceback.print_exc()
 
 # -----------------------------------------------------------------------------
 # UI COMPONENTS: Canvas
@@ -175,6 +298,8 @@ class MainWindow(QMainWindow):
     request_load_data = pyqtSignal(str)
     # Signal sending: (High-pass/l_freq, Low-pass/h_freq, Notch)
     request_run_pipeline = pyqtSignal(float, float, float)
+    request_run_ica = pyqtSignal()
+    request_apply_ica = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -192,10 +317,13 @@ class MainWindow(QMainWindow):
         self.worker.error_occurred.connect(self.show_error)
         self.worker.data_loaded.connect(self.on_data_loaded)
         self.worker.psd_ready.connect(self.update_plot)
+        self.worker.ica_ready.connect(self.display_ica_components)
         
         # Connect worker slots
         self.request_load_data.connect(self.worker.load_data)
         self.request_run_pipeline.connect(self.worker.run_pipeline)
+        self.request_run_ica.connect(self.worker.run_ica)
+        self.request_apply_ica.connect(self.worker.apply_ica)
         
         self.thread.start()
         
@@ -343,6 +471,31 @@ class MainWindow(QMainWindow):
         gb_proc.setLayout(gb_proc_layout)
         sidebar_layout.addWidget(gb_proc)
 
+        # 3. ICA Section
+        gb_ica = QGroupBox("ICA Artifact Removal")
+        gb_ica_layout = QVBoxLayout()
+        
+        self.btn_calc_ica = QPushButton("1. Calculate ICA")
+        self.btn_calc_ica.setToolTip("Fit ICA and show component maps")
+        self.btn_calc_ica.clicked.connect(self.run_ica_click)
+        self.btn_calc_ica.setEnabled(False)
+        
+        l_ica = QLabel("Exclude Components (IDs):")
+        self.input_ica_exclude = QLineEdit()
+        self.input_ica_exclude.setPlaceholderText("e.g. 0, 2")
+        
+        self.btn_apply_ica = QPushButton("2. Apply ICA & Re-plot")
+        self.btn_apply_ica.clicked.connect(self.apply_ica_click)
+        self.btn_apply_ica.setEnabled(False) # Enabled after Calc? Or just always allow checking
+        
+        gb_ica_layout.addWidget(self.btn_calc_ica)
+        gb_ica_layout.addWidget(l_ica)
+        gb_ica_layout.addWidget(self.input_ica_exclude)
+        gb_ica_layout.addWidget(self.btn_apply_ica)
+        
+        gb_ica.setLayout(gb_ica_layout)
+        sidebar_layout.addWidget(gb_ica)
+
         # Spacer to push log to bottom
         sidebar_layout.addStretch()
 
@@ -409,6 +562,8 @@ class MainWindow(QMainWindow):
         self.raw_data = raw # Store reference
         self.btn_run.setEnabled(True)
         self.btn_sensors.setEnabled(True)
+        self.btn_calc_ica.setEnabled(True) # Enable ICA
+        self.btn_apply_ica.setEnabled(True)
         QMessageBox.information(self, "Success", "EEG Data Loaded Successfully.")
 
     def check_sensors(self):
@@ -440,6 +595,25 @@ class MainWindow(QMainWindow):
             
         except ValueError:
             self.show_error("Invalid Filter Parameters. Please enter numeric values.")
+
+    def run_ica_click(self):
+        self.request_run_ica.emit()
+
+    def apply_ica_click(self):
+        excludes = self.input_ica_exclude.text()
+        self.request_apply_ica.emit(excludes)
+
+    def display_ica_components(self, ica_solution):
+        """
+        Slot to plot ICA components on the Main Thread.
+        This fixes the 'Matplotlib GUI outside main thread' crash.
+        """
+        self.log_status("Opening ICA Components Window...")
+        try:
+             # Standard MNE Plot (creates a new Qt Window)
+             ica_solution.plot_components(show=True)
+        except Exception as e:
+            self.show_error(f"Plotting Error: {e}")
 
     def update_plot(self, freqs, psd_mean, filter_info_str):
         """Updates the Matplotlib canvas with the new PSD data."""
