@@ -14,6 +14,7 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
     *   **Low-Pass Filter:** Eliminate high-frequency noise.
     *   **Notch Filter:** Suppress line noise (50/60 Hz).
 *   **Independent Component Analysis (ICA):** Powerful artifact removal tool using FastICA to identify and exclude blinks (`EOG`) and heartbeats (`ECG`) from the data.
+*   **Event-Related Potentials (ERP):** Automatically extracts events and computes averaged evoked responses (ERP), visualized as a global "Butterfly Plot".
 *   **Spectral Analysis:** Real-time computation and visualization of **Power Spectral Density (PSD)** using Welch's method.
 *   **Modern Dark UI:** A sleek, VS Code-inspired dark theme optimized for long research sessions.
 
@@ -60,6 +61,10 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
         *   Click `Calculate ICA` to decompose the signal into independent components.
         *   Inspect the topomaps in the popup window. Identify blink/heartbeat artifacts (e.g., Component 0).
         *   Enter the ID (e.g., `0`) in the "Exclude" box and click `Apply ICA`. The PSD plot will update to show the cleaned signal.
+    *   **ERP Analysis:**
+        *   Select a stimulus trigger from the "Select Event Trigger" dropdown (auto-populated).
+        *   Set your epoch window (e.g., `tmin: -0.2`, `tmax: 0.5`).
+        *   Click `Compute & Plot ERP` to view the averaged evoked response (Butterfly Plot).
     *   **Process:** Click `Run Pipeline`. The PSD plot on the right will update to show the frequency power distribution of your processed data.
 
 ## 📂 Architecture
