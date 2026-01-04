@@ -13,6 +13,7 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
     *   **High-Pass Filter:** Remove slow drifts and DC offsets.
     *   **Low-Pass Filter:** Eliminate high-frequency noise.
     *   **Notch Filter:** Suppress line noise (50/60 Hz).
+*   **Independent Component Analysis (ICA):** Powerful artifact removal tool using FastICA to identify and exclude blinks (`EOG`) and heartbeats (`ECG`) from the data.
 *   **Spectral Analysis:** Real-time computation and visualization of **Power Spectral Density (PSD)** using Welch's method.
 *   **Modern Dark UI:** A sleek, VS Code-inspired dark theme optimized for long research sessions.
 
@@ -41,7 +42,7 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
 
 3.  **Install dependencies:**
     ```bash
-    pip install mne PyQt6 PyQt6-Qt6 PyQt6-sip matplotlib numpy scipy
+    pip install mne PyQt6 PyQt6-Qt6 PyQt6-sip matplotlib numpy scipy scikit-learn
     ```
 
 ## 🖥️ Usage
@@ -55,6 +56,10 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
     *   **Load Data:** Click `Load EEG Data` and select your file (e.g., `subject_01.vhdr`).
     *   **Verify Sensors:** Click `📍 Check Sensors` to ensure your channels are mapped correctly.
     *   **Set Filters:** Input your desired High-pass, Low-pass, and Notch frequencies (default: 1.0 - 40.0 Hz, Notch 50.0 Hz).
+    *   **ICA Artifact Removal:**
+        *   Click `Calculate ICA` to decompose the signal into independent components.
+        *   Inspect the topomaps in the popup window. Identify blink/heartbeat artifacts (e.g., Component 0).
+        *   Enter the ID (e.g., `0`) in the "Exclude" box and click `Apply ICA`. The PSD plot will update to show the cleaned signal.
     *   **Process:** Click `Run Pipeline`. The PSD plot on the right will update to show the frequency power distribution of your processed data.
 
 ## 📂 Architecture
