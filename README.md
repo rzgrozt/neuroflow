@@ -1,9 +1,11 @@
 # NeuroFlow - EEG Signal Analysis MVP
 
 **NeuroFlow** (MVP) is a professional-grade desktop application for EEG signal analysis, built with Python. It leverages **MNE-Python** for powerful neuroscience computations and **PyQt6** for a modern, responsive user interface.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 This project demonstrates a strict **Model-View-Controller (MVC)** architecture with **multithreading** to ensure a seamless user experience, preventing GUI freezes during heavy signal processing tasks.
 
 ## 🚀 Key Features
