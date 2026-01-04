@@ -91,7 +91,14 @@ The application is structured to decouple UI from Logic:
 
 ## 📸 Screenshots
 
-*(Add screenshots of your application here to showcase the Dark UI and PSD plots)*
+<img width="1283" height="899" alt="ss1" src="https://github.com/user-attachments/assets/a3105fac-5ff1-48ef-af2f-b0a99ef44839" />
+
+<img width="1287" height="865" alt="ss2" src="https://github.com/user-attachments/assets/834bd9ad-9cc4-4a96-97ea-6108ba25eb33" />
+
+<img width="807" height="925" alt="ss3" src="https://github.com/user-attachments/assets/050dfc96-c021-49e2-8429-1fd5f4cfc146" />
+
+<img width="1302" height="874" alt="ss4" src="https://github.com/user-attachments/assets/9c667a99-0c87-4ba4-b40a-36335a70e7f2" />
+
 
 ## 📄 License
 
