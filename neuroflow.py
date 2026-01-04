@@ -13,7 +13,8 @@ from matplotlib.figure import Figure
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QFileDialog, QFrame,
-    QTextEdit, QMessageBox, QGroupBox, QComboBox, QDoubleSpinBox
+    QTextEdit, QMessageBox, QGroupBox, QComboBox, QDoubleSpinBox,
+    QSplitter, QSlider, QWidget
 )
 from PyQt6.QtCore import (
     Qt, QObject, QThread, pyqtSignal, pyqtSlot
@@ -329,6 +330,176 @@ class AnalysisWorker(QObject):
         except Exception as e:
             self.error_occurred.emit(f"ERP Error: {str(e)}")
             traceback.print_exc()
+
+# -----------------------------------------------------------------------------
+# UI COMPONENTS: ERP Viewer Window
+# -----------------------------------------------------------------------------
+
+class ERPViewer(QMainWindow):
+    """
+    Dedicated Window for Interactive ERP Analysis.
+    Displays:
+    1. Butterfly Plot (Top) - Temporal view of all sensors.
+    2. Topomap (Bottom) - Spatial view at a specific time point.
+    Controls:
+    - Time Slider to scrub through the epoch.
+    """
+    def __init__(self, evoked, parent=None):
+        super().__init__(parent)
+        self.evoked = evoked
+        self.setWindowTitle("Interactive ERP Explorer")
+        self.resize(800, 900)
+        self.apply_dark_theme()
+        
+        # Data properties
+        self.times = self.evoked.times
+        self.tmin = self.times[0]
+        self.tmax = self.times[-1]
+        self.current_time = 0.0
+        self.vline = None # Reference to the vertical line on plot
+        
+        self.init_ui()
+        self.plot_initial_state()
+
+    def apply_dark_theme(self):
+        self.setStyleSheet("""
+            QMainWindow { background-color: #2b2b2b; }
+            QLabel { color: #ffffff; font-size: 14px; font-weight: bold; }
+            QSlider::groove:horizontal {
+                border: 1px solid #555;
+                height: 8px;
+                background: #1e1e1e;
+                margin: 2px 0;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #007acc;
+                border: 1px solid #555;
+                width: 18px;
+                height: 18px;
+                margin: -7px 0;
+                border-radius: 9px;
+            }
+        """)
+
+    def init_ui(self):
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        main_layout = QVBoxLayout(main_widget)
+        
+        # Splitter for adjustable heights
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        # 1. TOP PLOT : Butterfly
+        self.butterfly_canvas = MplCanvas(self, width=5, height=4)
+        splitter.addWidget(self.butterfly_canvas)
+        
+        # 2. BOTTOM AREA : Topomap + Controls
+        bottom_widget = QWidget()
+        bottom_layout = QVBoxLayout(bottom_widget)
+        
+        # Topomap Canvas
+        self.topomap_canvas = MplCanvas(self, width=5, height=4)
+        bottom_layout.addWidget(self.topomap_canvas)
+        
+        # Controls Row
+        controls_layout = QHBoxLayout()
+        
+        self.lbl_time = QLabel("Time: 0 ms")
+        self.lbl_time.setFixedWidth(100)
+        
+        # Slider setup
+        # Convert time range to milliseconds for integer slider
+        min_ms = int(self.tmin * 1000)
+        max_ms = int(self.tmax * 1000)
+        
+        self.slider_time = QSlider(Qt.Orientation.Horizontal)
+        self.slider_time.setRange(min_ms, max_ms)
+        self.slider_time.setValue(0) # Start at 0ms (stimulus onset)
+        self.slider_time.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.slider_time.setTickInterval(50) # Tick every 50ms
+        self.slider_time.valueChanged.connect(self.on_time_changed)
+        # sliderReleased to do heavy plot update if needed (optional optimization)
+        self.slider_time.sliderReleased.connect(self.update_topomap_heavy)
+
+        controls_layout.addWidget(self.lbl_time)
+        controls_layout.addWidget(self.slider_time)
+        
+        bottom_layout.addLayout(controls_layout)
+        splitter.addWidget(bottom_widget)
+        
+        main_layout.addWidget(splitter)
+
+    def plot_initial_state(self):
+        """Draws the static Butterfly plot and initial Topomap."""
+        # --- Plot Butterfly ---
+        ax = self.butterfly_canvas.axes
+        ax.clear()
+        
+        # MNE plot onto our axes
+        # spatial_colors=True colors lines by sensor position
+        self.evoked.plot(axes=ax, spatial_colors=True, show=False, time_unit='s')
+        
+        # Customize look to match simple dark theme if MNE overrode it, 
+        # but MNE plot usually handles its own styling. 
+        # We just ensure the facecolor matches.
+        # Note: MNE's plot() might change title/labels.
+        ax.set_title("Global Field Power (Butterfly Plot)", color='white')
+        ax.xaxis.label.set_color('white')
+        ax.yaxis.label.set_color('white')
+        ax.tick_params(colors='white')
+        
+        # Add interactive vertical line at t=0
+        self.vline = ax.axvline(x=0, color='white', linestyle='--', linewidth=1.5, alpha=0.8)
+        self.butterfly_canvas.draw()
+        
+        # --- Plot Initial Topomap using the 'heavy' update logic ---
+        self.update_topomap_heavy()
+
+    def on_time_changed(self, value):
+        """Called repeatedly while dragging slider."""
+        time_sec = value / 1000.0
+        self.current_time = time_sec
+        self.lbl_time.setText(f"Time: {value} ms")
+        
+        # Update Vertical Line position efficiently (blit would be better but simple redraw is OK for this scale)
+        if self.vline:
+            self.vline.set_xdata([time_sec, time_sec])
+            self.butterfly_canvas.draw() # Redraw just to move line
+            
+        # NOTE: We can skip full topomap redraw here if it's too slow, 
+        # and only do it on release.
+        # But let's try to see if MNE's topomap is fast enough for continuous scrubbing.
+        # Usually it is NOT fast enough for 60fps, so we might throttle or only do on release.
+        # User requirement: "consider updating only on sliderReleased or use a slight delay".
+        # We will Implement the 'sliderReleased' approach for the heavy topomap, 
+        # but maybe doing it here makes it 'feel' better if data is small. 
+        # For safety/performance, we will ONLY move the line here. 
+        # Topomap updates in sliderReleased.
+    
+    def update_topomap_heavy(self):
+        """
+        Re-plots the topomap. 
+        Called on sliderReleased OR manual trigger.
+        Allows for smoother UI during dragging.
+        """
+        # Get current time from stored state (updated by slider move)
+        t = self.current_time
+        
+        ax = self.topomap_canvas.axes
+        ax.clear()
+        
+        # Plot topomap
+        # times=[t] plots a single map
+        # colorbar=True adds a colorbar, slightly squishing the plot
+        try:
+            self.evoked.plot_topomap(times=[t], axes=ax, show=False, colorbar=False,
+                                     outlines='head', sphere='auto')
+            
+            ax.set_title(f"Topography at {t*1000:.0f} ms", color='white', fontsize=12)
+            self.topomap_canvas.draw()
+        except Exception as e:
+            print(f"Topomap Error: {e}")
 
 # -----------------------------------------------------------------------------
 # UI COMPONENTS: Canvas
@@ -725,11 +896,13 @@ class MainWindow(QMainWindow):
         self.request_compute_erp.emit(event_name, tmin, tmax)
 
     def handle_erp_ready(self, evoked):
-        """Plots the ERP using MNE's Butterfly plot."""
-        self.log_status("Displaying ERP Plot...")
+        """Plots the ERP using the new Interactive Viewer."""
+        self.log_status("Launching Interactive ERP Viewer...")
         try:
-            # spatial_colors=True gives a nice butterfly plot with channel location color coding
-            evoked.plot(spatial_colors=True, show=True)
+            # We keep a reference to the window to prevent it from being garbage collected
+            self.erp_viewer = ERPViewer(evoked, self)
+            self.erp_viewer.show()
+            self.log_status("ERP Viewer Opened.")
         except Exception as e:
             self.show_error(f"Plotting Error: {e}")
 
