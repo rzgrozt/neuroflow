@@ -17,6 +17,7 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
     *   **Multi-Format Data Loading:** Support for **BrainVision (.vhdr)**, **.fif**, and **.edf** EEG datasets.
     *   **Robust Montage Handling:** Automatically detects missing channel locations (common in vhdr) and applies a standard '10-20' montage for consistent analysis.
     *   **Interactive Topomap:** "**Check Sensors**" feature to visualize electrode positions 2D topographically to verify channel mapping.
+    *   **Dataset Inspector:** Comprehensive metadata viewer showing recording info (sampling rate, duration, channels) and **Event Statistics** table for data integrity verification.
     *   **Preprocessing Pipeline:**
         *   **High-Pass Filter:** Remove slow drifts and DC offsets.
         *   **Low-Pass Filter:** Eliminate high-frequency noise.
@@ -73,6 +74,7 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
 2.  **Workflow:**
     *   **Load Data (Data & Preprocessing):** Click `Load EEG Data` and select your file (e.g., `subject_01.vhdr`).
     *   **Verify Sensors:** Click `📍 Check Sensors` to ensure your channels are mapped correctly.
+    *   **Inspect Dataset:** Click `ℹ️ Dataset Info` to view recording metadata and verify event counts before analysis.
     *   **Set Filters:** Input your desired High-pass, Low-pass, and Notch frequencies (default: 1.0 - 40.0 Hz, Notch 50.0 Hz).
     *   **ICA Artifact Removal (Page 2):**
         *   Click `Calculate ICA` to decompose the signal into independent components.
