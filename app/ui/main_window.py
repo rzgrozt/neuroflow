@@ -494,7 +494,7 @@ class MainWindow(QMainWindow):
             self,
             "Open EEG Data",
             "",
-            "EEG Data (*.vhdr *.fif *.edf);;All Files (*)"
+            "EEG Data (*.vhdr *.VHDR *.ahdr *.AHDR *.fif *.FIF *.edf *.EDF *.bdf *.BDF);;All Files (*)"
         )
         if file_name:
             self.log_status(f"Selected file: {file_name}")
@@ -633,14 +633,24 @@ class MainWindow(QMainWindow):
 
             # Open the interactive epoch viewer (blocks until window closes)
             # scalings='auto' adapts to data, n_epochs=10 shows 10 at a time
+            # Force light style via matplotlib to make traces visible on dark theme
+            import matplotlib.pyplot as plt
+            original_style = plt.rcParams.copy()
+            plt.style.use('default')
+            mne.viz.set_browser_backend('matplotlib')
+
             n_channels = min(30, len(self.epochs.ch_names))
-            self.epochs.plot(
-                block=True,
-                scalings='auto',
-                n_epochs=10,
-                n_channels=n_channels,
-                title=f"Epoch Inspection: {event_name} (Click to reject)"
-            )
+            try:
+                self.epochs.plot(
+                    block=True,
+                    scalings='auto',
+                    n_epochs=10,
+                    n_channels=n_channels,
+                    title=f"Epoch Inspection: {event_name} (Click to reject)"
+                )
+            finally:
+                # Restore original style
+                plt.rcParams.update(original_style)
 
             # After the plot window is closed, drop the marked bad epochs
             self.epochs.drop_bad()
@@ -739,7 +749,15 @@ class MainWindow(QMainWindow):
             times = tfr_power.times
             freqs = tfr_power.freqs
 
-            # Simple Spectrogram Plot
+            # Apply baseline correction (percent change relative to pre-stimulus)
+            # Baseline is from start of epoch to time 0
+            baseline_mask = times < 0
+            if baseline_mask.any():
+                baseline = data[:, baseline_mask].mean(axis=1, keepdims=True)
+                # Percent change: (data - baseline) / baseline * 100
+                data = (data - baseline) / (baseline + 1e-10) * 100
+
+            # Spectrogram Plot with baseline-corrected data
             # Gouraud shading for smoothness
             self.canvas_advanced.axes.pcolormesh(
                 times, freqs, data, shading='gouraud', cmap='viridis'

@@ -278,7 +278,7 @@ class EEGWorker(QObject):
     def compute_tfr(self, ch_name: str, l_freq: float, h_freq: float, n_cycles_div: int = 2):
         """
         Computes Time-Frequency Representation (TFR) using Morlet wavelets.
-        Focuses on a single channel to save performance.
+        Uses fixed-length epochs from continuous data for robust computation.
         """
         if self.raw is None:
             self.error_occurred.emit("No data loaded.")
@@ -289,32 +289,43 @@ class EEGWorker(QObject):
         )
 
         try:
-            freqs = np.arange(l_freq, h_freq, 1.0)
+            # Verify channel exists
+            if ch_name not in self.raw.ch_names:
+                self.error_occurred.emit(f"Channel '{ch_name}' not found in data.")
+                return
+
+            freqs = np.arange(l_freq, h_freq + 1, 1.0)
             n_cycles = freqs / n_cycles_div
 
-            if self.events is None:
+            # Create a copy of raw with only the selected channel for efficiency
+            raw_pick = self.raw.copy().pick([ch_name])
+
+            # Use fixed-length epochs for robust TFR computation
+            # This avoids issues with event-based epoching
+            epoch_duration = 2.0  # 2-second epochs
+            epochs = mne.make_fixed_length_epochs(
+                raw_pick,
+                duration=epoch_duration,
+                preload=True,
+                verbose=False
+            )
+
+            if len(epochs) == 0:
                 self.error_occurred.emit(
-                    "TFR requires events/epochs to visualize ERD/ERS. No events found."
+                    f"TFR Error: Could not create epochs for channel {ch_name}."
                 )
                 return
 
-            picks = [ch_name]
-            tmin, tmax = -1.0, 2.0
+            self.log_message.emit(f"Created {len(epochs)} epochs for TFR analysis...")
 
-            event_id_to_use = None
-            if self.event_id:
-                first_key = list(self.event_id.keys())[0]
-                event_id_to_use = {first_key: self.event_id[first_key]}
-
-            epochs = mne.Epochs(
-                self.raw, self.events, event_id=event_id_to_use,
-                tmin=tmin, tmax=tmax, picks=picks,
-                baseline=(tmin, 0), preload=True, verbose=False
-            )
-
-            power = mne.time_frequency.tfr_morlet(
-                epochs, n_cycles=n_cycles, return_itc=False,
-                freqs=freqs, average=True, verbose=False
+            # Compute TFR using modern API
+            power = epochs.compute_tfr(
+                method='morlet',
+                freqs=freqs,
+                n_cycles=n_cycles,
+                return_itc=False,
+                average=True,
+                verbose=False
             )
 
             self.tfr_ready.emit(power)
@@ -371,7 +382,8 @@ class EEGWorker(QObject):
             if self.events is not None:
                 epochs = mne.Epochs(
                     self.raw, self.events, event_id=None, tmin=tmin, tmax=tmax,
-                    baseline=None, preload=True, verbose=False
+                    baseline=None, preload=True, verbose=False,
+                    event_repeated='drop'
                 )
             else:
                 epochs = mne.make_fixed_length_epochs(
