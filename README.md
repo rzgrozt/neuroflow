@@ -22,6 +22,7 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
         *   **Low-Pass Filter:** Eliminate high-frequency noise.
         *   **Notch Filter:** Suppress line noise (50/60 Hz).
     *   **Independent Component Analysis (ICA):** Powerful artifact removal tool using FastICA to identify and exclude blinks (`EOG`) and heartbeats (`ECG`) from the data.
+    *   **Manual Epoch Inspection (Gold Standard QC):** Interactive visual inspection of epochs with MNE's built-in viewer. Click to reject artifacts (muscle movements, cable sway) before ERP averaging.
     *   **Event-Related Potentials (ERP):** Automatically extracts events and computes averaged evoked responses (ERP), visualized as a global "Butterfly Plot".
     *   **Spectral Analysis:** Real-time computation and visualization of **Power Spectral Density (PSD)** using Welch's method.
     *   **File & Export:**
@@ -80,6 +81,7 @@ This project demonstrates a strict **Model-View-Controller (MVC)** architecture 
     *   **ERP Analysis (Page 3):**
         *   Select a stimulus trigger from the "Select Event Trigger" dropdown (auto-populated).
         *   Set your epoch window (e.g., `tmin: -0.2`, `tmax: 0.5`).
+        *   **Manual Epoch Inspection (Gold Standard QC):** Click `👁️ Inspect & Reject Epochs` to open MNE's interactive epoch viewer. Click on bad epochs (muscle artifacts, cable sway, etc.) to mark them for rejection. Close the window to apply.
         *   Click `Compute & Plot ERP` to view the averaged evoked response (Butterfly Plot) in a dedicated interactive viewer.
     *   **Advanced Analysis (Page 4):**
         *   **TFR:** Select a channel and click `Compute TFR` to see the Time-Frequency heatmap.

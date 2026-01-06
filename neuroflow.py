@@ -583,6 +583,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("NeuroFlow - Professional EEG Analysis")
         self.resize(1300, 850)
         self.raw_data = None
+        self.epochs = None  # Holds epochs for manual inspection
+        self.epochs_inspected = False  # Flag to track if epochs have been inspected
         
         self.thread = QThread()
         self.worker = AnalysisWorker()
@@ -884,7 +886,15 @@ class MainWindow(QMainWindow):
         t_row.addWidget(QLabel("tmin:")); t_row.addWidget(self.spin_tmin)
         t_row.addWidget(QLabel("tmax:")); t_row.addWidget(self.spin_tmax)
         l_erp.addLayout(t_row)
-        
+
+        # Manual epoch inspection button (Gold Standard QC)
+        self.btn_inspect_epochs = QPushButton("👁️ Inspect & Reject Epochs")
+        self.btn_inspect_epochs.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_inspect_epochs.clicked.connect(self.inspect_epochs_click)
+        self.btn_inspect_epochs.setEnabled(False)
+        self.btn_inspect_epochs.setToolTip("Visually inspect epochs and manually reject artifacts")
+        l_erp.addWidget(self.btn_inspect_epochs)
+
         self.btn_erp = QPushButton("Compute & Plot ERP")
         self.btn_erp.clicked.connect(self.compute_erp_click)
         self.btn_erp.setEnabled(False)
@@ -1062,22 +1072,127 @@ class MainWindow(QMainWindow):
     def populate_event_dropdown(self, event_id_dict):
         """Populates the event dropdown with unique events found in the data."""
         self.combo_events.clear()
+        self.epochs = None  # Reset epochs when new data is loaded
+        self.epochs_inspected = False
         if not event_id_dict:
             self.log_status("No events found for ERP analysis.")
             self.btn_erp.setEnabled(False)
+            self.btn_inspect_epochs.setEnabled(False)
             return
 
         self.combo_events.addItems(list(event_id_dict.keys()))
-        self.btn_erp.setEnabled(True)
+        self.btn_inspect_epochs.setEnabled(True)  # Enable inspection button
+        self.btn_erp.setEnabled(True)  # Allow ERP without inspection (optional workflow)
         self.log_status(f"Populated ERP dropdown with {len(event_id_dict)} events.")
 
+    def inspect_epochs_click(self):
+        """
+        Gold Standard manual QC: Opens MNE's interactive epoch viewer.
+        User can click epochs to mark them as 'bad'. On close, bad epochs are dropped.
+        This MUST run on Main Thread since epochs.plot() creates a GUI window.
+        """
+        event_name = self.combo_events.currentText()
+        if not event_name:
+            self.show_error("Please select an event trigger first.")
+            return
+
+        # Access worker data (events and raw)
+        if self.worker.raw is None:
+            self.show_error("No data loaded. Please load and preprocess data first.")
+            return
+
+        if self.worker.events is None or self.worker.event_id is None:
+            self.show_error("No events found in this dataset.")
+            return
+
+        if event_name not in self.worker.event_id:
+            self.show_error(f"Event '{event_name}' not found in data.")
+            return
+
+        tmin = self.spin_tmin.value()
+        tmax = self.spin_tmax.value()
+
+        self.log_status(f"Creating epochs for '{event_name}' (tmin={tmin}, tmax={tmax})...")
+
+        try:
+            # Create epochs on main thread using worker's data
+            specific_event_id = {event_name: self.worker.event_id[event_name]}
+            self.epochs = mne.Epochs(
+                self.worker.raw,
+                self.worker.events,
+                event_id=specific_event_id,
+                tmin=tmin,
+                tmax=tmax,
+                baseline=(tmin, 0),
+                preload=True,
+                verbose=False
+            )
+
+            n_epochs_before = len(self.epochs)
+            self.log_status(f"Created {n_epochs_before} epochs. Opening interactive viewer...")
+            self.log_status("Click epochs to mark as bad. Close window when done.")
+
+            # Open the interactive epoch viewer (blocks until window closes)
+            # scalings='auto' adapts to data, n_epochs=10 shows 10 at a time
+            n_channels = min(30, len(self.epochs.ch_names))
+            self.epochs.plot(
+                block=True,
+                scalings='auto',
+                n_epochs=10,
+                n_channels=n_channels,
+                title=f"Epoch Inspection: {event_name} (Click to reject)"
+            )
+
+            # After the plot window is closed, drop the marked bad epochs
+            self.epochs.drop_bad()
+
+            n_epochs_after = len(self.epochs)
+            n_rejected = n_epochs_before - n_epochs_after
+
+            self.epochs_inspected = True
+            self.log_status(
+                f"Manual inspection complete. Removed {n_rejected} epochs. "
+                f"Remaining: {n_epochs_after}."
+            )
+
+            if n_epochs_after == 0:
+                self.show_error("All epochs were rejected! Cannot compute ERP.")
+                self.btn_erp.setEnabled(False)
+            else:
+                self.btn_erp.setEnabled(True)
+                self.log_status("Ready to compute ERP with cleaned epochs.")
+
+        except Exception as e:
+            self.show_error(f"Epoch inspection error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
     def compute_erp_click(self):
+        """
+        Compute ERP. If epochs were manually inspected, use those.
+        Otherwise, request fresh epochs from the worker.
+        """
         event_name = self.combo_events.currentText()
         if not event_name:
             return
         tmin = self.spin_tmin.value()
         tmax = self.spin_tmax.value()
-        self.request_compute_erp.emit(event_name, tmin, tmax)
+
+        # If epochs were already inspected and cleaned, compute ERP locally
+        if self.epochs is not None and self.epochs_inspected:
+            self.log_status(f"Computing ERP from {len(self.epochs)} inspected epochs...")
+            try:
+                evoked = self.epochs.average()
+                self.log_status(f"ERP Computed from inspected epochs. Averaged {len(self.epochs)} epochs.")
+                self.handle_erp_ready(evoked)
+            except Exception as e:
+                self.show_error(f"ERP Error: {str(e)}")
+                import traceback
+                traceback.print_exc()
+        else:
+            # No inspection performed, use worker-based computation
+            self.log_status("Computing ERP (no manual inspection performed)...")
+            self.request_compute_erp.emit(event_name, tmin, tmax)
 
     def handle_erp_ready(self, evoked):
         """Plots the ERP using the new Interactive Viewer."""
