@@ -1,117 +1,157 @@
-# NeuroFlow - EEG Signal Analysis MVP
+# NeuroFlow
 
-**NeuroFlow** (MVP) is a professional-grade desktop application for EEG signal analysis, built with Python. It leverages **MNE-Python** for powerful neuroscience computations and **PyQt6** for a modern, responsive user interface.
+**NeuroFlow** is a professional-grade desktop application for EEG signal analysis, built with Python. It leverages **MNE-Python** for neuroscience computations and **PyQt6** for a modern, responsive user interface.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-This project demonstrates a strict **Model-View-Controller (MVC)** architecture with **multithreading** to ensure a seamless user experience, preventing GUI freezes during heavy signal processing tasks.
+---
 
-## 🚀 Key Features
+## Features
 
-*   **Key Features:**
-    *   **Advanced Spectral Analysis:**
-        *   **Time-Frequency Representation (TFR):** Visualize global or channel-specific oscillatory power changes over time (Morlet Wavelets).
-        *   **Functional Connectivity:** Compute and visualize brain network interactions using **Weighted Phase Lag Index (wPLI)** (Alpha band).
-    *   **Multi-Format Data Loading:** Support for **BrainVision (.vhdr)**, **.fif**, and **.edf** EEG datasets.
-    *   **Robust Montage Handling:** Automatically detects missing channel locations (common in vhdr) and applies a standard '10-20' montage for consistent analysis.
-    *   **Interactive Topomap:** "**Check Sensors**" feature to visualize electrode positions 2D topographically to verify channel mapping.
-    *   **Dataset Inspector:** Comprehensive metadata viewer showing recording info (sampling rate, duration, channels) and **Event Statistics** table for data integrity verification.
-    *   **Preprocessing Pipeline:**
-        *   **High-Pass Filter:** Remove slow drifts and DC offsets.
-        *   **Low-Pass Filter:** Eliminate high-frequency noise.
-        *   **Notch Filter:** Suppress line noise (50/60 Hz).
-    *   **Independent Component Analysis (ICA):** Powerful artifact removal tool using FastICA to identify and exclude blinks (`EOG`) and heartbeats (`ECG`) from the data.
-    *   **Manual Epoch Inspection (Gold Standard QC):** Interactive visual inspection of epochs with MNE's built-in viewer. Click to reject artifacts (muscle movements, cable sway) before ERP averaging.
-    *   **Event-Related Potentials (ERP):** Automatically extracts events and computes averaged evoked responses (ERP), visualized as a global "Butterfly Plot".
-    *   **Spectral Analysis:** Real-time computation and visualization of **Power Spectral Density (PSD)** using Welch's method.
-    *   **File & Export:**
-        *   **Save Clean Data:** Save your processed/filtered EEG data to standard `.fif` format for future use.
-        *   **Analyst Snapshots:** One-click **Screenshot** logic to capture high-quality images of your current analysis view for reports.
-    *   **Modern Accordion UI:** A sleek, properly organized sidebar using `QToolBox` to manage complex workflows efficiently.
+### Data Management
 
-## 🛠️ Tech Stack
+| Feature | Description |
+|---------|-------------|
+| **Multi-Format Support** | Load BrainVision (`.vhdr`), MNE-Python (`.fif`), and European Data Format (`.edf`) files |
+| **Automatic Montage** | Detects missing channel locations and applies standard 10-20 montage |
+| **Dataset Inspector** | View recording metadata, sampling rate, duration, and event statistics |
+| **Sensor Visualization** | Interactive 2D topographic display of electrode positions |
+| **Data Export** | Save processed data to `.fif` format for future analysis |
 
-*   **Language:** Python 3.10+
-*   **GUI:** PyQt6 (Qt Widgets, Signals & Slots)
-*   **Backend:** MNE-Python (Neuroscience/EEG Analysis)
-*   **Connectivity:** `mne-connectivity`
-*   **Numerical:** NumPy, SciPy
-*   **Plotting:** Matplotlib (integrated via FigureCanvasQTAgg)
-*   **Concurrency:** `QThread` + `QObject` Worker Pattern
+### Signal Processing
 
-## 📦 Installation
+| Feature | Description |
+|---------|-------------|
+| **High-Pass Filter** | Remove slow drifts and DC offsets |
+| **Low-Pass Filter** | Eliminate high-frequency noise |
+| **Notch Filter** | Suppress power line noise (50/60 Hz) |
+| **ICA Decomposition** | FastICA-based artifact identification and removal (EOG, ECG) |
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/rzgrozt/neuroflow.git
-    cd neuroflow
-    ```
+### Analysis Tools
 
-2.  **Create a virtual environment (Optional but Recommended):**
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows: venv\Scripts\activate
-    ```
+| Feature | Description |
+|---------|-------------|
+| **Power Spectral Density** | Real-time PSD computation using Welch's method |
+| **Event-Related Potentials** | Automatic event extraction with averaged evoked responses |
+| **Time-Frequency Analysis** | Morlet wavelet-based oscillatory power visualization |
+| **Functional Connectivity** | Weighted Phase Lag Index (wPLI) for brain network analysis |
 
-3.  **Install dependencies:**
-    ```bash
-    pip install mne mne-connectivity PyQt6 PyQt6-Qt6 PyQt6-sip matplotlib numpy scipy scikit-learn
-    ```
-   or
-   Install Dependencies
-   ```bash
-   pip install -r requirements.txt
-   ```
-## 🖥️ Usage
+### Quality Control
 
-1.  **Run the Application:**
-    ```bash
-    python neuroflow.py
-    ```
+| Feature | Description |
+|---------|-------------|
+| **Manual Epoch Inspection** | Interactive epoch viewer for artifact rejection |
+| **Event Statistics** | Tabular view of event counts for data integrity verification |
+| **Screenshot Export** | Capture analysis views for reports and documentation |
 
-2.  **Workflow:**
-    *   **Load Data (Data & Preprocessing):** Click `Load EEG Data` and select your file (e.g., `subject_01.vhdr`).
-    *   **Verify Sensors:** Click `📍 Check Sensors` to ensure your channels are mapped correctly.
-    *   **Inspect Dataset:** Click `ℹ️ Dataset Info` to view recording metadata and verify event counts before analysis.
-    *   **Set Filters:** Input your desired High-pass, Low-pass, and Notch frequencies (default: 1.0 - 40.0 Hz, Notch 50.0 Hz).
-    *   **ICA Artifact Removal (Page 2):**
-        *   Click `Calculate ICA` to decompose the signal into independent components.
-        *   Inspect the topomaps in the popup window. Identify blink/heartbeat artifacts (e.g., Component 0).
-        *   Enter the ID (e.g., `0`) in the "Exclude" box and click `Apply ICA`. The PSD plot will update to show the cleaned signal.
-    *   **ERP Analysis (Page 3):**
-        *   Select a stimulus trigger from the "Select Event Trigger" dropdown (auto-populated).
-        *   Set your epoch window (e.g., `tmin: -0.2`, `tmax: 0.5`).
-        *   **Manual Epoch Inspection (Gold Standard QC):** Click `👁️ Inspect & Reject Epochs` to open MNE's interactive epoch viewer. Click on bad epochs (muscle artifacts, cable sway, etc.) to mark them for rejection. Close the window to apply.
-        *   Click `Compute & Plot ERP` to view the averaged evoked response (Butterfly Plot) in a dedicated interactive viewer.
-    *   **Advanced Analysis (Page 4):**
-        *   **TFR:** Select a channel and click `Compute TFR` to see the Time-Frequency heatmap.
-        *   **Connectivity:** Click `Alpha Band (8-12Hz)` to launch the **Connectivity Explorer** popup and visualize the functional brain network.
+---
 
-## 📂 Architecture
+## Tech Stack
 
-The application is structured to decouple UI from Logic:
+| Component | Technology |
+|-----------|------------|
+| Language | Python 3.10+ |
+| GUI Framework | PyQt6 |
+| Signal Processing | MNE-Python |
+| Connectivity Analysis | mne-connectivity |
+| Numerical Computing | NumPy, SciPy |
+| Visualization | Matplotlib |
+| Concurrency | QThread Worker Pattern |
 
-*   **`AnalysisWorker` (Model/Controller Logic):**
-    *   Runs on a separate `QThread`.
-    *   Handles all MNE I/O and heavy computations.
-    *   Communicates results back to the main thread via `pyqtSignal`.
-*   **`MainWindow` (View):**
-    *   Manages the GUI layout and user interactions.
-    *   Updates the log and plots based on signals from the Worker.
+---
 
-## 📸 Screenshots
+## Installation
 
-<img width="1283" height="899" alt="ss1" src="https://github.com/user-attachments/assets/a3105fac-5ff1-48ef-af2f-b0a99ef44839" />
+**Clone the repository:**
 
-<img width="1287" height="865" alt="ss2" src="https://github.com/user-attachments/assets/834bd9ad-9cc4-4a96-97ea-6108ba25eb33" />
+```bash
+git clone https://github.com/rzgrozt/neuroflow.git
+cd neuroflow
+```
 
-<img width="807" height="925" alt="ss3" src="https://github.com/user-attachments/assets/050dfc96-c021-49e2-8429-1fd5f4cfc146" />
+**Create a virtual environment (recommended):**
 
-<img width="1302" height="874" alt="ss4" src="https://github.com/user-attachments/assets/9c667a99-0c87-4ba4-b40a-36335a70e7f2" />
+```bash
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+```
 
+**Install dependencies:**
 
-## 📄 License
+```bash
+pip install -r requirements.txt
+```
 
-This project is open-source and available for educational and portfolio purposes.
+Or install manually:
+
+```bash
+pip install mne mne-connectivity PyQt6 PyQt6-Qt6 PyQt6-sip matplotlib numpy scipy scikit-learn
+```
+
+---
+
+## Usage
+
+**Run the application:**
+
+```bash
+python main.py
+```
+
+### Workflow Overview
+
+1. **Load Data** - Select your EEG file (`.vhdr`, `.fif`, or `.edf`)
+2. **Verify Setup** - Check sensor positions and inspect dataset metadata
+3. **Preprocess** - Apply bandpass and notch filters
+4. **Remove Artifacts** - Run ICA to identify and exclude EOG/ECG components
+5. **Inspect Epochs** - Manually reject bad epochs using the interactive viewer
+6. **Analyze** - Compute ERPs, TFR, or connectivity measures
+
+---
+
+## Project Structure
+
+```
+neuroflow/
+├── main.py                      # Application entry point
+├── requirements.txt             # Python dependencies
+├── README.md
+└── app/
+    ├── __init__.py
+    ├── core/
+    │   ├── __init__.py
+    │   └── workers.py           # EEGWorker: MNE processing on background thread
+    └── ui/
+        ├── __init__.py
+        ├── canvas.py            # MplCanvas: Matplotlib-PyQt6 integration
+        ├── dialogs.py           # DatasetInfoDialog, ConnectivityDialog, ERPViewer
+        └── main_window.py       # MainWindow: Primary application interface
+```
+
+### Architecture
+
+The application follows a separation of concerns pattern with multithreading:
+
+- **`EEGWorker`** (Background Thread) - Handles all MNE I/O and heavy computations, communicates via Qt signals
+- **`MainWindow`** (Main Thread) - Manages UI layout, user interactions, and plot updates
+- **Dialogs** - Modular popup windows for specialized visualizations
+
+---
+
+## Screenshots
+
+<img width="1283" height="899" alt="Main Interface" src="https://github.com/user-attachments/assets/a3105fac-5ff1-48ef-af2f-b0a99ef44839" />
+
+<img width="1287" height="865" alt="ICA Analysis" src="https://github.com/user-attachments/assets/834bd9ad-9cc4-4a96-97ea-6108ba25eb33" />
+
+<img width="807" height="925" alt="ERP Viewer" src="https://github.com/user-attachments/assets/050dfc96-c021-49e2-8429-1fd5f4cfc146" />
+
+<img width="1302" height="874" alt="Connectivity Explorer" src="https://github.com/user-attachments/assets/9c667a99-0c87-4ba4-b40a-36335a70e7f2" />
+
+---
+
+## License
+
+This project is open-source under the MIT License.
