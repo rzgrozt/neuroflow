@@ -5,6 +5,7 @@ Contains styled sidebar widgets with "Neural Elegance" theme:
 - SectionCard: Card-style container for grouped controls
 - ParamRow: Clean parameter input row
 - ActionButton: Styled action buttons with states
+- CollapsibleBox: Collapsible section with triangle toggle icons
 - StyledSidebar: Complete sidebar widget assembly
 """
 
