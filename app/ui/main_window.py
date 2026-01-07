@@ -11,9 +11,10 @@ import numpy as np
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QLineEdit, QFileDialog, QFrame,
-    QTextEdit, QMessageBox, QGroupBox, QComboBox, QDoubleSpinBox,
-    QSplitter, QToolBox, QTabWidget, QToolBar, QApplication
+    QLabel, QLineEdit, QFileDialog, QFrame,
+    QMessageBox, QComboBox, QDoubleSpinBox,
+    QTabWidget, QToolBar, QApplication, QSplitter,
+    QScrollArea, QSizePolicy
 )
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
@@ -21,6 +22,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
 from app.core.workers import EEGWorker
 from .canvas import MplCanvas
 from .dialogs import DatasetInfoDialog, ConnectivityDialog, ERPViewer
+from .theme import ModernAboutDialog
 
 
 class MainWindow(QMainWindow):
@@ -72,7 +74,6 @@ class MainWindow(QMainWindow):
 
         self.thread.start()
 
-        self.apply_dark_theme()
         self.init_ui()
         self.init_toolbar()
         self.create_menu()
@@ -105,12 +106,9 @@ class MainWindow(QMainWindow):
         help_menu.addAction(about_action)
 
     def show_about_dialog(self):
-        QMessageBox.about(
-            self, "About NeuroFlow",
-            "NeuroFlow v1.0\n\n"
-            "Developed by Ruzgar Ozturk with love\n"
-            "Powered by MNE-Python & PyQt6"
-        )
+        """Shows the modern About dialog."""
+        dialog = ModernAboutDialog(self)
+        dialog.exec()
 
     def on_save_clean_data(self):
         if not self.worker.raw:
@@ -142,317 +140,217 @@ class MainWindow(QMainWindow):
     def on_save_finished(self, filename):
         QMessageBox.information(self, "Save Successful", f"Data saved to:\n{filename}")
 
-    def apply_dark_theme(self):
-        """Applies a Modern Dark Theme using QSS."""
-        qss = """
-        QMainWindow {
-            background-color: #2b2b2b;
-        }
-        QWidget {
-            color: #ffffff;
-            font-family: 'Segoe UI', 'Roboto', sans-serif;
-            font-size: 14px;
-        }
-        QGroupBox {
-            border: 1px solid #444;
-            border-radius: 6px;
-            margin-top: 12px;
-            font-weight: bold;
-            color: #ccc;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            left: 10px;
-            padding: 0 5px;
-        }
-        QPushButton {
-            background-color: #3c3c3c;
-            border: 1px solid #555;
-            border-radius: 4px;
-            padding: 8px 16px;
-            color: white;
-        }
-        QPushButton:hover {
-            background-color: #4c4c4c;
-            border-color: #007acc;
-        }
-        QPushButton:pressed {
-            background-color: #007acc;
-        }
-        QLineEdit {
-            background-color: #3c3c3c;
-            border: 1px solid #555;
-            border-radius: 4px;
-            padding: 4px;
-            color: white;
-            selection-background-color: #007acc;
-        }
-        QLineEdit:focus {
-            border: 1px solid #007acc;
-        }
-        QTextEdit {
-            background-color: #1e1e1e;
-            border: 1px solid #444;
-            color: #dcdcdc;
-            font-family: 'Consolas', 'Courier New', monospace;
-        }
-        QLabel {
-            color: #cccccc;
-        }
-        QToolBox::tab {
-            background-color: #383838;
-            border: 1px solid #444;
-            color: #f0f0f0;
-            font-weight: bold;
-            padding: 5px;
-            border-radius: 4px;
-        }
-        QToolBox::tab:selected {
-            background-color: #444444;
-            color: #007acc;
-            border-bottom: 2px solid #007acc;
-        }
-        """
-        self.setStyleSheet(qss)
-
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        sidebar = QFrame()
-        sidebar.setFrameShape(QFrame.Shape.StyledPanel)
-        sidebar.setFixedWidth(350)
-        sidebar.setStyleSheet("background-color: #252526; border-radius: 8px;")
-        sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setSpacing(10)
-
-        # Title
-        title_label = QLabel("NeuroFlow")
-        title_label.setStyleSheet(
-            "font-size: 24px; font-weight: bold; color: #007acc; margin-bottom: 5px;"
+        # Import sidebar components
+        from .sidebar import (
+            SidebarTitle, SectionCard, ParamRow, ParamSpinRow,
+            ActionButton, StatusLog, CollapsibleBox
         )
-        sidebar_layout.addWidget(title_label)
 
-        # ToolBox Setup
-        self.toolbox = QToolBox()
+        # Create Splitter
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(2)
+        main_layout.addWidget(splitter)
 
-        # --- PAGE 1: Data & Preprocessing ---
-        page_data = QWidget()
-        layout_data = QVBoxLayout(page_data)
-        layout_data.setSpacing(15)
-        layout_data.setContentsMargins(10, 15, 10, 10)
+        # ====== SIDEBAR WIDGET ======
+        sidebar_widget = QWidget()
+        sidebar_widget.setMinimumWidth(250)
+        sidebar_widget.setMaximumWidth(350)
+        
+        sidebar_layout = QVBoxLayout(sidebar_widget)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setSpacing(0)
 
-        gb_d = QGroupBox("Dataset")
-        l_d = QVBoxLayout()
-        l_d.setSpacing(8)
-        self.btn_load = QPushButton("Load EEG Data")
-        self.btn_load.setCursor(Qt.CursorShape.PointingHandCursor)
+        # App Title
+        title_widget = SidebarTitle()
+        sidebar_layout.addWidget(title_widget)
+
+        # Scrollable sidebar container (replaces QToolBox)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setObjectName("sidebarScrollArea")
+
+        # Container widget for scroll area
+        scroll_content = QWidget()
+        scroll_content.setObjectName("sidebarScrollContent")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(8, 8, 8, 8)
+        scroll_layout.setSpacing(5)
+        scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        # ====== SECTION 1: Data & Preprocessing ======
+        section_data = CollapsibleBox("Data & Preprocessing", "📂", expanded=True)
+
+        # Dataset Card
+        card_dataset = SectionCard("Dataset", "💾")
+        self.btn_load = ActionButton("Load EEG Data")
         self.btn_load.clicked.connect(self.browse_file)
+        card_dataset.addWidget(self.btn_load)
 
-        self.btn_sensors = QPushButton("Check Sensors")
-        self.btn_sensors.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sensors = ActionButton("Check Sensors")
         self.btn_sensors.setEnabled(False)
         self.btn_sensors.clicked.connect(self.check_sensors)
+        card_dataset.addWidget(self.btn_sensors)
 
-        self.btn_dataset_info = QPushButton("Dataset Info")
-        self.btn_dataset_info.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_dataset_info = ActionButton("Dataset Info")
         self.btn_dataset_info.setEnabled(False)
         self.btn_dataset_info.clicked.connect(self.show_dataset_info)
         self.btn_dataset_info.setToolTip("View dataset metadata and event statistics")
+        card_dataset.addWidget(self.btn_dataset_info)
+        section_data.addWidget(card_dataset)
 
-        l_d.addWidget(self.btn_load)
-        l_d.addWidget(self.btn_sensors)
-        l_d.addWidget(self.btn_dataset_info)
-        gb_d.setLayout(l_d)
-        layout_data.addWidget(gb_d)
+        # Signal Pipeline Card
+        card_pipeline = SectionCard("Signal Pipeline", "⚡")
 
-        gb_p = QGroupBox("Signal Pipeline")
-        l_p = QVBoxLayout()
-        l_p.setSpacing(8)
+        self.param_hp = ParamRow("HP (Hz):", "1.0")
+        card_pipeline.addWidget(self.param_hp)
+        self.input_hp = self.param_hp.input
 
-        h_layout = QHBoxLayout()
-        h_layout.addWidget(QLabel("HP (Hz):"))
-        self.input_hp = QLineEdit("1.0")
-        h_layout.addWidget(self.input_hp)
-        l_p.addLayout(h_layout)
+        self.param_lp = ParamRow("LP (Hz):", "40.0")
+        card_pipeline.addWidget(self.param_lp)
+        self.input_lp = self.param_lp.input
 
-        l_layout = QHBoxLayout()
-        l_layout.addWidget(QLabel("LP (Hz):"))
-        self.input_lp = QLineEdit("40.0")
-        l_layout.addWidget(self.input_lp)
-        l_p.addLayout(l_layout)
+        self.param_notch = ParamRow("Notch:", "50.0")
+        card_pipeline.addWidget(self.param_notch)
+        self.input_notch = self.param_notch.input
 
-        n_layout = QHBoxLayout()
-        n_layout.addWidget(QLabel("Notch:"))
-        self.input_notch = QLineEdit("50.0")
-        n_layout.addWidget(self.input_notch)
-        l_p.addLayout(n_layout)
-
-        self.btn_run = QPushButton("Run Pipeline")
-        self.btn_run.setStyleSheet("background-color: #007acc; font-weight: bold;")
-        self.btn_run.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_run = ActionButton("Run Pipeline", primary=True)
         self.btn_run.clicked.connect(self.launch_pipeline)
         self.btn_run.setEnabled(False)
-        l_p.addWidget(self.btn_run)
-        gb_p.setLayout(l_p)
-        layout_data.addWidget(gb_p)
+        card_pipeline.addWidget(self.btn_run)
+        section_data.addWidget(card_pipeline)
 
-        layout_data.addStretch()
-        self.toolbox.addItem(page_data, "Data & Preprocessing")
+        scroll_layout.addWidget(section_data)
 
-        # --- PAGE 2: Artifact Removal (ICA) ---
-        page_ica = QWidget()
-        layout_ica = QVBoxLayout(page_ica)
-        layout_ica.setSpacing(15)
-        layout_ica.setContentsMargins(10, 15, 10, 10)
+        # ====== SECTION 2: Artifact Removal ======
+        section_ica = CollapsibleBox("Artifact Removal", "🧹", expanded=False)
 
-        gb_ica_inner = QGroupBox("Independent Component Analysis")
-        l_ica = QVBoxLayout()
-        l_ica.setSpacing(10)
+        card_ica = SectionCard("Independent Component Analysis", "🔬")
 
-        self.btn_calc_ica = QPushButton("1. Calculate ICA")
+        self.btn_calc_ica = ActionButton("1. Calculate ICA")
         self.btn_calc_ica.clicked.connect(self.run_ica_click)
         self.btn_calc_ica.setEnabled(False)
+        card_ica.addWidget(self.btn_calc_ica)
 
-        l_exclude = QLabel("Exclude Components (IDs):")
+        exclude_label = QLabel("Exclude Components:")
+        exclude_label.setStyleSheet("color: #9090a8; font-size: 12px; background: transparent;")
+        card_ica.addWidget(exclude_label)
+
         self.input_ica_exclude = QLineEdit()
         self.input_ica_exclude.setPlaceholderText("e.g. 0, 2 (comma separated)")
+        card_ica.addWidget(self.input_ica_exclude)
 
-        self.btn_apply_ica = QPushButton("2. Apply ICA")
+        self.btn_apply_ica = ActionButton("2. Apply ICA")
         self.btn_apply_ica.clicked.connect(self.apply_ica_click)
         self.btn_apply_ica.setEnabled(False)
+        card_ica.addWidget(self.btn_apply_ica)
 
-        l_ica.addWidget(self.btn_calc_ica)
-        l_ica.addWidget(l_exclude)
-        l_ica.addWidget(self.input_ica_exclude)
-        l_ica.addWidget(self.btn_apply_ica)
-        gb_ica_inner.setLayout(l_ica)
+        section_ica.addWidget(card_ica)
+        scroll_layout.addWidget(section_ica)
 
-        layout_ica.addWidget(gb_ica_inner)
-        layout_ica.addStretch()
-        self.toolbox.addItem(page_ica, "Artifact Removal (ICA)")
+        # ====== SECTION 3: ERP Analysis ======
+        section_erp = CollapsibleBox("ERP Analysis", "📊", expanded=False)
 
-        # --- PAGE 3: ERP ANALYSIS ---
-        page_erp = QWidget()
-        layout_erp = QVBoxLayout(page_erp)
-        layout_erp.setSpacing(15)
-        layout_erp.setContentsMargins(10, 15, 10, 10)
+        card_erp = SectionCard("Event-Related Potentials", "📈")
 
-        gb_erp_inner = QGroupBox("Event-Related Potentials")
-        l_erp = QVBoxLayout()
-        l_erp.setSpacing(10)
+        event_label = QLabel("Trigger Event:")
+        event_label.setStyleSheet("color: #9090a8; font-size: 12px; background: transparent;")
+        card_erp.addWidget(event_label)
 
-        l_erp.addWidget(QLabel("Trigger Event:"))
         self.combo_events = QComboBox()
-        l_erp.addWidget(self.combo_events)
+        card_erp.addWidget(self.combo_events)
 
-        t_row = QHBoxLayout()
-        self.spin_tmin = QDoubleSpinBox()
-        self.spin_tmin.setRange(-5, 5)
-        self.spin_tmin.setValue(-0.2)
-        self.spin_tmax = QDoubleSpinBox()
-        self.spin_tmax.setRange(-5, 5)
-        self.spin_tmax.setValue(0.5)
-        t_row.addWidget(QLabel("tmin:"))
-        t_row.addWidget(self.spin_tmin)
-        t_row.addWidget(QLabel("tmax:"))
-        t_row.addWidget(self.spin_tmax)
-        l_erp.addLayout(t_row)
+        time_row = ParamSpinRow("Time:", -5.0, 5.0, -0.2, 0.5)
+        self.spin_tmin = time_row.spin_min
+        self.spin_tmax = time_row.spin_max
+        card_erp.addWidget(time_row)
 
-        # Manual epoch inspection button (Gold Standard QC)
-        self.btn_inspect_epochs = QPushButton("Inspect & Reject Epochs")
-        self.btn_inspect_epochs.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_inspect_epochs = ActionButton("Inspect & Reject Epochs")
         self.btn_inspect_epochs.clicked.connect(self.inspect_epochs_click)
         self.btn_inspect_epochs.setEnabled(False)
-        self.btn_inspect_epochs.setToolTip(
-            "Visually inspect epochs and manually reject artifacts"
-        )
-        l_erp.addWidget(self.btn_inspect_epochs)
+        self.btn_inspect_epochs.setToolTip("Visually inspect epochs and manually reject artifacts")
+        card_erp.addWidget(self.btn_inspect_epochs)
 
-        self.btn_erp = QPushButton("Compute & Plot ERP")
+        self.btn_erp = ActionButton("Compute & Plot ERP", primary=True)
         self.btn_erp.clicked.connect(self.compute_erp_click)
         self.btn_erp.setEnabled(False)
-        l_erp.addWidget(self.btn_erp)
+        card_erp.addWidget(self.btn_erp)
 
-        gb_erp_inner.setLayout(l_erp)
-        layout_erp.addWidget(gb_erp_inner)
-        layout_erp.addStretch()
-        self.toolbox.addItem(page_erp, "ERP Analysis")
+        section_erp.addWidget(card_erp)
+        scroll_layout.addWidget(section_erp)
 
-        # --- PAGE 4: ADVANCED ANALYSIS ---
-        page_adv = QWidget()
-        layout_adv = QVBoxLayout(page_adv)
-        layout_adv.setSpacing(15)
-        layout_adv.setContentsMargins(10, 15, 10, 10)
+        # ====== SECTION 4: Advanced Analysis ======
+        section_advanced = CollapsibleBox("Advanced Analysis", "🔮", expanded=False)
 
-        gb_tfr = QGroupBox("Time-Frequency (TFR)")
-        l_tfr = QVBoxLayout()
-        l_tfr.setSpacing(8)
+        # TFR Card
+        card_tfr = SectionCard("Time-Frequency (TFR)", "🌊")
 
-        l_tfr.addWidget(QLabel("Channel:"))
+        chan_label = QLabel("Channel:")
+        chan_label.setStyleSheet("color: #9090a8; font-size: 12px; background: transparent;")
+        card_tfr.addWidget(chan_label)
+
         self.combo_channels = QComboBox()
-        l_tfr.addWidget(self.combo_channels)
+        card_tfr.addWidget(self.combo_channels)
 
-        f_row = QHBoxLayout()
-        self.spin_tfr_l = QDoubleSpinBox()
-        self.spin_tfr_l.setValue(4.0)
-        self.spin_tfr_h = QDoubleSpinBox()
-        self.spin_tfr_h.setValue(30.0)
-        f_row.addWidget(QLabel("Freqs:"))
-        f_row.addWidget(self.spin_tfr_l)
-        f_row.addWidget(QLabel("-"))
-        f_row.addWidget(self.spin_tfr_h)
-        l_tfr.addLayout(f_row)
+        freq_row = ParamSpinRow("Freqs:", 0.1, 100.0, 4.0, 30.0)
+        self.spin_tfr_l = freq_row.spin_min
+        self.spin_tfr_h = freq_row.spin_max
+        card_tfr.addWidget(freq_row)
 
-        self.btn_tfr = QPushButton("Compute TFR")
+        self.btn_tfr = ActionButton("Compute TFR", primary=True)
         self.btn_tfr.clicked.connect(self.compute_tfr_click)
         self.btn_tfr.setEnabled(False)
-        l_tfr.addWidget(self.btn_tfr)
-        gb_tfr.setLayout(l_tfr)
-        layout_adv.addWidget(gb_tfr)
+        card_tfr.addWidget(self.btn_tfr)
+        section_advanced.addWidget(card_tfr)
 
-        gb_conn = QGroupBox("Connectivity (wPLI)")
-        l_conn = QVBoxLayout()
-        self.btn_conn = QPushButton("Alpha Band (8-12Hz)")
+        # Connectivity Card
+        card_conn = SectionCard("Connectivity (wPLI)", "🔗")
+
+        self.btn_conn = ActionButton("Alpha Band (8-12Hz)")
         self.btn_conn.clicked.connect(self.compute_connectivity_click)
         self.btn_conn.setEnabled(False)
-        l_conn.addWidget(self.btn_conn)
-        gb_conn.setLayout(l_conn)
-        layout_adv.addWidget(gb_conn)
+        card_conn.addWidget(self.btn_conn)
+        section_advanced.addWidget(card_conn)
 
-        layout_adv.addStretch()
-        self.toolbox.addItem(page_adv, "Advanced Analysis")
+        scroll_layout.addWidget(section_advanced)
 
-        # Add ToolBox to sidebar layout
-        sidebar_layout.addWidget(self.toolbox)
+        # Set scroll content and add to sidebar
+        scroll_area.setWidget(scroll_content)
+        sidebar_layout.addWidget(scroll_area)
 
-        # 3. Logs
-        sidebar_layout.addWidget(QLabel("Status Log:"))
-        self.log_area = QTextEdit()
-        self.log_area.setReadOnly(True)
-        self.log_area.setMinimumHeight(150)
-        sidebar_layout.addWidget(self.log_area)
+        # ====== STATUS LOG ======
+        self.status_log = StatusLog()
+        self.log_area = self.status_log.log_area
+        sidebar_layout.addWidget(self.status_log)
 
-        main_layout.addWidget(sidebar)
+        # Add Sidebar to Splitter
+        splitter.addWidget(sidebar_widget)
 
+        # ====== MAIN CONTENT CONTENT ======
         self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("QTabWidget::pane { border: 0; }")
 
         self.tab_signal = QWidget()
         tab1_layout = QVBoxLayout(self.tab_signal)
-        tab1_layout.setContentsMargins(0, 0, 0, 0)
+        tab1_layout.setContentsMargins(10, 10, 0, 0)
 
         self.canvas = MplCanvas(self, width=5, height=4, dpi=100)
+        self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         tab1_layout.addWidget(self.canvas)
 
         # Initial plot placeholder
         self.canvas.axes.text(
             0.5, 0.5,
             'NeuroFlow Ready\nLoad BrainVision (.vhdr) or others\nto begin analysis',
-            color='gray', ha='center', va='center', fontsize=12
+            color='#606080', ha='center', va='center', fontsize=14,
+            fontweight='medium'
         )
         self.canvas.draw()
 
@@ -460,18 +358,18 @@ class MainWindow(QMainWindow):
 
         self.tab_advanced = QWidget()
         self.tab2_layout = QVBoxLayout(self.tab_advanced)
-        self.tab2_layout.setContentsMargins(0, 0, 0, 0)
+        self.tab2_layout.setContentsMargins(10, 10, 0, 0)
 
         self.canvas_advanced = MplCanvas(self, width=5, height=4, dpi=100)
+        self.canvas_advanced.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.tab2_layout.addWidget(self.canvas_advanced)
 
         self.tabs.addTab(self.tab_advanced, "Advanced Analysis")
 
-        main_layout.addWidget(self.tabs)
-
-        # Stretch factors
-        main_layout.setStretch(0, 1)
-        main_layout.setStretch(1, 4)
+        splitter.addWidget(self.tabs)
+        
+        # Splitter Stretch
+        splitter.setStretchFactor(1, 4)
 
     # -------------------------------------------------------------------------
     # UI Interactions
