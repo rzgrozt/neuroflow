@@ -271,14 +271,14 @@ class ModernAboutDialog(QDialog):
         github_btn.setStyleSheet(btn_style)
         github_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         github_btn.clicked.connect(
-            lambda: __import__('webbrowser').open('https://github.com/ruzgar-dev/NeuroFlow')
+            lambda: __import__('webbrowser').open('https://github.com/rzgrozt/neuroflow')
         )
 
         linkedin_btn = QPushButton("LinkedIn")
         linkedin_btn.setStyleSheet(btn_style)
         linkedin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         linkedin_btn.clicked.connect(
-            lambda: __import__('webbrowser').open('https://linkedin.com/in/ruzgar-ozturk')
+            lambda: __import__('webbrowser').open('https://linkedin.com/in/rzgrozt')
         )
 
         links_layout.addWidget(github_btn)
