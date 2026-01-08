@@ -18,6 +18,27 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 
 
+# =============================================================================
+# STYLE CONSTANTS - Single source of truth for consistent styling
+# =============================================================================
+
+# Layout constants
+LABEL_WIDTH = 50  # Fixed label width for all param rows
+WIDGET_SPACING = 6  # Standard spacing between widgets
+CONTENT_MARGINS = (8, 6, 8, 8)  # Standard content margins (left, top, right, bottom)
+CARD_MARGINS = (10, 10, 10, 10)  # Card internal margins
+
+# Label style - shared across all param widgets
+LABEL_STYLE = """
+    QLabel {
+        color: #9090a8;
+        font-size: 12px;
+        font-weight: 500;
+        background: transparent;
+    }
+"""
+
+
 class SectionHeader(QWidget):
     """
     Modern section header with icon and title.
@@ -64,11 +85,12 @@ class SectionCard(QFrame):
     def __init__(self, title: str = "", icon: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("sectionCard")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._setup_style()
 
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(16, 16, 16, 16)
-        self.main_layout.setSpacing(12)
+        self.main_layout.setContentsMargins(*CARD_MARGINS)
+        self.main_layout.setSpacing(WIDGET_SPACING)
 
         if title:
             header = SectionHeader(title, icon)
@@ -77,7 +99,7 @@ class SectionCard(QFrame):
         # Content layout for child widgets
         self.content_layout = QVBoxLayout()
         self.content_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_layout.setSpacing(10)
+        self.content_layout.setSpacing(WIDGET_SPACING)
         self.main_layout.addLayout(self.content_layout)
 
     def _setup_style(self):
@@ -113,21 +135,15 @@ class ParamRow(QWidget):
 
     def __init__(self, label: str, default: str = "", placeholder: str = "", parent=None):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(WIDGET_SPACING)
 
         # Label
         self.label = QLabel(label)
-        self.label.setFixedWidth(70)
-        self.label.setStyleSheet("""
-            QLabel {
-                color: #9090a8;
-                font-size: 12px;
-                font-weight: 500;
-                background: transparent;
-            }
-        """)
+        self.label.setFixedWidth(LABEL_WIDTH)
+        self.label.setStyleSheet(LABEL_STYLE)
         layout.addWidget(self.label)
 
         # Input
@@ -147,6 +163,36 @@ class ParamRow(QWidget):
         self.input.setEnabled(enabled)
 
 
+class ParamComboRow(QWidget):
+    """
+    Horizontal row with fixed-width label and flexible QComboBox.
+    Matches ParamRow structure for consistent responsive behavior.
+    """
+
+    currentIndexChanged = pyqtSignal(int)
+
+    def __init__(self, label: str, parent=None):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(WIDGET_SPACING)
+
+        # Label
+        self.label = QLabel(label)
+        self.label.setFixedWidth(LABEL_WIDTH)
+        self.label.setStyleSheet(LABEL_STYLE)
+        layout.addWidget(self.label)
+
+        # ComboBox (flexible width)
+        self.combo = QComboBox()
+        self.combo.currentIndexChanged.connect(self.currentIndexChanged.emit)
+        layout.addWidget(self.combo)
+
+    def setEnabled(self, enabled: bool):
+        self.combo.setEnabled(enabled)
+
+
 class ParamSpinRow(QWidget):
     """
     Parameter row with double spin boxes for range inputs.
@@ -155,21 +201,15 @@ class ParamSpinRow(QWidget):
     def __init__(self, label: str, min_val: float, max_val: float,
                  default_min: float, default_max: float, parent=None):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(4)
 
         # Label
         lbl = QLabel(label)
-        lbl.setFixedWidth(50)
-        lbl.setStyleSheet("""
-            QLabel {
-                color: #9090a8;
-                font-size: 12px;
-                font-weight: 500;
-                background: transparent;
-            }
-        """)
+        lbl.setFixedWidth(LABEL_WIDTH)
+        lbl.setStyleSheet(LABEL_STYLE)
         layout.addWidget(lbl)
 
         # Min spin
@@ -181,7 +221,7 @@ class ParamSpinRow(QWidget):
         # Separator
         sep = QLabel("–")
         sep.setStyleSheet("color: #606080; background: transparent;")
-        sep.setFixedWidth(16)
+        sep.setFixedWidth(12)
         sep.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(sep)
 
@@ -214,10 +254,10 @@ class ActionButton(QPushButton):
                         stop:0 #0080b8, stop:1 #00a8e8);
                     color: #ffffff;
                     border: none;
-                    border-radius: 8px;
-                    padding: 12px 20px;
+                    border-radius: 6px;
+                    padding: 8px 12px;
                     font-weight: 600;
-                    font-size: 13px;
+                    font-size: 12px;
                 }
                 QPushButton:hover {
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
@@ -237,10 +277,10 @@ class ActionButton(QPushButton):
                     background-color: #1c1c28;
                     color: #c8c8e0;
                     border: 1px solid #2a2a40;
-                    border-radius: 8px;
-                    padding: 10px 16px;
+                    border-radius: 6px;
+                    padding: 8px 12px;
                     font-weight: 500;
-                    font-size: 13px;
+                    font-size: 12px;
                 }
                 QPushButton:hover {
                     background-color: #252538;
@@ -330,6 +370,7 @@ class CollapsibleBox(QFrame):
     def __init__(self, title: str, icon: str = "", expanded: bool = True, parent=None):
         super().__init__(parent)
         self.setObjectName("collapsibleBox")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._expanded = expanded
         self._title = title
         self._icon = icon
@@ -351,8 +392,8 @@ class CollapsibleBox(QFrame):
         self.content = QWidget()
         self.content.setObjectName("collapsibleContent")
         self.content_layout = QVBoxLayout(self.content)
-        self.content_layout.setContentsMargins(12, 8, 12, 12)
-        self.content_layout.setSpacing(10)
+        self.content_layout.setContentsMargins(*CONTENT_MARGINS)
+        self.content_layout.setSpacing(WIDGET_SPACING)
         self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.main_layout.addWidget(self.content)
 
@@ -477,7 +518,7 @@ def create_styled_sidebar():
     # Main sidebar frame
     sidebar = QFrame()
     sidebar.setObjectName("styledSidebar")
-    sidebar.setFixedWidth(360)
+    sidebar.setFixedWidth(300)
     sidebar.setStyleSheet("""
         #styledSidebar {
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -489,7 +530,7 @@ def create_styled_sidebar():
     """)
 
     main_layout = QVBoxLayout(sidebar)
-    main_layout.setContentsMargins(16, 16, 16, 16)
-    main_layout.setSpacing(12)
+    main_layout.setContentsMargins(4, 8, 4, 8)
+    main_layout.setSpacing(8)
 
     return sidebar, main_layout

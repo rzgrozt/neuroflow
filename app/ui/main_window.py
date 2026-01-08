@@ -184,19 +184,19 @@ class MainWindow(QMainWindow):
 
         # Import sidebar components
         from .sidebar import (
-            SidebarTitle, SectionCard, ParamRow, ParamSpinRow,
+            SidebarTitle, SectionCard, ParamRow, ParamComboRow, ParamSpinRow,
             ActionButton, StatusLog, CollapsibleBox
         )
 
         # Create Splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(2)
+        splitter.setHandleWidth(0)
+        splitter.setChildrenCollapsible(False)
         main_layout.addWidget(splitter)
 
         # ====== SIDEBAR WIDGET ======
         sidebar_widget = QWidget()
-        sidebar_widget.setMinimumWidth(250)
-        sidebar_widget.setMaximumWidth(350)
+        sidebar_widget.setFixedWidth(300)
         
         sidebar_layout = QVBoxLayout(sidebar_widget)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
@@ -217,12 +217,12 @@ class MainWindow(QMainWindow):
         scroll_content = QWidget()
         scroll_content.setObjectName("sidebarScrollContent")
         scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setContentsMargins(8, 8, 8, 8)
+        scroll_layout.setContentsMargins(4, 4, 4, 4)
         scroll_layout.setSpacing(5)
         scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # ====== SECTION 1: Data & Preprocessing ======
-        section_data = CollapsibleBox("Data & Preprocessing", "📂", expanded=True)
+        section_data = CollapsibleBox("Data & Preprocessing", "📂", expanded=False)
 
         # Dataset Card
         card_dataset = SectionCard("Dataset", "💾")
@@ -275,13 +275,9 @@ class MainWindow(QMainWindow):
         self.btn_calc_ica.setEnabled(False)
         card_ica.addWidget(self.btn_calc_ica)
 
-        exclude_label = QLabel("Exclude Components:")
-        exclude_label.setStyleSheet("color: #9090a8; font-size: 12px; background: transparent;")
-        card_ica.addWidget(exclude_label)
-
-        self.input_ica_exclude = QLineEdit()
-        self.input_ica_exclude.setPlaceholderText("e.g. 0, 2 (comma separated)")
-        card_ica.addWidget(self.input_ica_exclude)
+        self.param_ica_exclude = ParamRow("Exclude:", "", "e.g. 0, 2 (comma separated)")
+        self.input_ica_exclude = self.param_ica_exclude.input
+        card_ica.addWidget(self.param_ica_exclude)
 
         self.btn_apply_ica = ActionButton("2. Apply ICA")
         self.btn_apply_ica.clicked.connect(self.apply_ica_click)
@@ -296,12 +292,9 @@ class MainWindow(QMainWindow):
 
         card_erp = SectionCard("Event-Related Potentials", "📈")
 
-        event_label = QLabel("Trigger Event:")
-        event_label.setStyleSheet("color: #9090a8; font-size: 12px; background: transparent;")
-        card_erp.addWidget(event_label)
-
-        self.combo_events = QComboBox()
-        card_erp.addWidget(self.combo_events)
+        self.param_events = ParamComboRow("Event:")
+        self.combo_events = self.param_events.combo
+        card_erp.addWidget(self.param_events)
 
         time_row = ParamSpinRow("Time:", -5.0, 5.0, -0.2, 0.5)
         self.spin_tmin = time_row.spin_min
@@ -328,12 +321,9 @@ class MainWindow(QMainWindow):
         # TFR Card
         card_tfr = SectionCard("Time-Frequency (TFR)", "🌊")
 
-        chan_label = QLabel("Channel:")
-        chan_label.setStyleSheet("color: #9090a8; font-size: 12px; background: transparent;")
-        card_tfr.addWidget(chan_label)
-
-        self.combo_channels = QComboBox()
-        card_tfr.addWidget(self.combo_channels)
+        self.param_channels = ParamComboRow("Channel:")
+        self.combo_channels = self.param_channels.combo
+        card_tfr.addWidget(self.param_channels)
 
         freq_row = ParamSpinRow("Freqs:", 0.1, 100.0, 4.0, 30.0)
         self.spin_tfr_l = freq_row.spin_min
