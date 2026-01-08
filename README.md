@@ -45,6 +45,7 @@
 | **Manual Epoch Inspection** | Interactive epoch viewer for artifact rejection |
 | **Event Statistics** | Tabular view of event counts for data integrity verification |
 | **Screenshot Export** | Capture analysis views for reports and documentation |
+| **Pipeline History** | Automatic logging of all preprocessing steps with timestamps for reproducibility |
 
 ---
 
