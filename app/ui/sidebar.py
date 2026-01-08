@@ -92,6 +92,11 @@ class SectionCard(QFrame):
         """)
 
     def addWidget(self, widget):
+        # Ensure widgets expand horizontally to fill the card width
+        widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            widget.sizePolicy().verticalPolicy()
+        )
         self.content_layout.addWidget(widget)
 
     def addLayout(self, layout):
@@ -320,6 +325,8 @@ class CollapsibleBox(QFrame):
     Provides a compact, inspector-panel style collapsible container.
     """
 
+    expanded = pyqtSignal(object)  # Emits self when expanded
+
     def __init__(self, title: str, icon: str = "", expanded: bool = True, parent=None):
         super().__init__(parent)
         self.setObjectName("collapsibleBox")
@@ -404,6 +411,8 @@ class CollapsibleBox(QFrame):
         self.content.setVisible(self._expanded)
         self._update_header_text()
         self._update_header_style()
+        if self._expanded:
+            self.expanded.emit(self)  # Notify when opened
 
     def addWidget(self, widget):
         """Add a widget to the content area."""

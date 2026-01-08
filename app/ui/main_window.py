@@ -75,27 +75,33 @@ class MainWindow(QMainWindow):
         self.thread.start()
 
         self.init_ui()
-        self.init_toolbar()
         self.create_menu()
-
-    def init_toolbar(self):
-        self.toolbar = QToolBar("Main Toolbar")
-        self.toolbar.setIconSize(QSize(24, 24))
-        self.addToolBar(self.toolbar)
-
-        save_action = QAction("Save Clean Data", self)
-        save_action.setStatusTip("Save the processed data to .fif")
-        save_action.triggered.connect(self.on_save_clean_data)
-        self.toolbar.addAction(save_action)
-
-        screenshot_action = QAction("Screenshot", self)
-        screenshot_action.setStatusTip("Take a screenshot of the application")
-        screenshot_action.triggered.connect(self.on_take_screenshot)
-        self.toolbar.addAction(screenshot_action)
 
     def create_menu(self):
         """Creates the Menu Bar."""
         menu_bar = self.menuBar()
+
+        # File Menu
+        file_menu = menu_bar.addMenu("&File")
+
+        save_action = QAction("&Save Clean Data", self)
+        save_action.setShortcut("Ctrl+S")
+        save_action.setStatusTip("Save the processed data to .fif")
+        save_action.triggered.connect(self.on_save_clean_data)
+        file_menu.addAction(save_action)
+
+        screenshot_action = QAction("S&creenshot", self)
+        screenshot_action.setShortcut("Ctrl+Shift+S")
+        screenshot_action.setStatusTip("Take a screenshot of the application")
+        screenshot_action.triggered.connect(self.on_take_screenshot)
+        file_menu.addAction(screenshot_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction("E&xit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
 
         # Help Menu
         help_menu = menu_bar.addMenu("&Help")
@@ -322,6 +328,12 @@ class MainWindow(QMainWindow):
 
         scroll_layout.addWidget(section_advanced)
 
+        # ====== ACCORDION BEHAVIOR ======
+        # Track all sections for exclusive expansion
+        self.sidebar_sections = [section_data, section_ica, section_erp, section_advanced]
+        for section in self.sidebar_sections:
+            section.expanded.connect(self._on_section_expanded)
+
         # Set scroll content and add to sidebar
         scroll_area.setWidget(scroll_content)
         sidebar_layout.addWidget(scroll_area)
@@ -374,6 +386,12 @@ class MainWindow(QMainWindow):
     # -------------------------------------------------------------------------
     # UI Interactions
     # -------------------------------------------------------------------------
+
+    def _on_section_expanded(self, expanded_section):
+        """Collapse all sections except the one being expanded (accordion behavior)."""
+        for section in self.sidebar_sections:
+            if section is not expanded_section:
+                section.setExpanded(False)
 
     def log_status(self, message):
         """Appends message to the sidebar status log."""
