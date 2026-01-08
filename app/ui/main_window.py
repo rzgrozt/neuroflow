@@ -1,8 +1,4 @@
-"""
-Main Window Module
-
-Contains the MainWindow class - the primary application window.
-"""
+"""Main Window - Primary application window for NeuroFlow."""
 
 import traceback
 
@@ -25,12 +21,9 @@ from .theme import ModernAboutDialog
 
 
 class MainWindow(QMainWindow):
-    """
-    Main application window for NeuroFlow EEG analysis.
-    """
-    # Signals to communicate with worker
+    """Main application window for NeuroFlow EEG analysis."""
+
     request_load_data = pyqtSignal(str)
-    # Signal sending: (High-pass/l_freq, Low-pass/h_freq, Notch)
     request_run_pipeline = pyqtSignal(float, float, float)
     request_run_ica = pyqtSignal()
     request_apply_ica = pyqtSignal(str)
@@ -81,10 +74,9 @@ class MainWindow(QMainWindow):
         self.create_menu()
 
     def create_menu(self):
-        """Creates the Menu Bar."""
+        """Create the menu bar."""
         menu_bar = self.menuBar()
 
-        # File Menu
         file_menu = menu_bar.addMenu("&File")
 
         save_action = QAction("&Save Clean Data", self)
@@ -106,7 +98,6 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # Help Menu
         help_menu = menu_bar.addMenu("&Help")
 
         about_action = QAction("&About", self)
@@ -115,7 +106,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction(about_action)
 
     def show_about_dialog(self):
-        """Shows the modern About dialog."""
+        """Show the About dialog."""
         dialog = ModernAboutDialog(self)
         dialog.exec()
 
@@ -147,7 +138,7 @@ class MainWindow(QMainWindow):
             self.log_status(f"Screenshot saved to {filename}")
 
     def on_save_finished(self, filename):
-        # Save pipeline history JSON alongside the data file
+        """Handle save completion and save pipeline history."""
         import json
         from pathlib import Path
         
@@ -193,7 +184,7 @@ class MainWindow(QMainWindow):
         splitter.setChildrenCollapsible(False)
         main_layout.addWidget(splitter)
 
-        # ====== SIDEBAR WIDGET ======
+        # Sidebar
         sidebar_widget = QWidget()
         sidebar_widget.setFixedWidth(330)
         
@@ -220,7 +211,7 @@ class MainWindow(QMainWindow):
         scroll_layout.setSpacing(5)
         scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # ====== SECTION 1: Data & Preprocessing ======
+        # Data & Preprocessing Section
         section_data = CollapsibleBox("Data & Preprocessing", "📂", expanded=False)
 
         # Dataset Card
@@ -264,7 +255,7 @@ class MainWindow(QMainWindow):
 
         scroll_layout.addWidget(section_data)
 
-        # ====== SECTION 2: Artifact Removal ======
+        # Artifact Removal Section
         section_ica = CollapsibleBox("Artifact Removal", "🧹", expanded=False)
 
         card_ica = SectionCard("Independent Component Analysis", "🔬")
@@ -286,7 +277,7 @@ class MainWindow(QMainWindow):
         section_ica.addWidget(card_ica)
         scroll_layout.addWidget(section_ica)
 
-        # ====== SECTION 3: ERP Analysis ======
+        # ERP Analysis Section
         section_erp = CollapsibleBox("ERP Analysis", "📊", expanded=False)
 
         card_erp = SectionCard("Event-Related Potentials", "📈")
@@ -314,7 +305,7 @@ class MainWindow(QMainWindow):
         section_erp.addWidget(card_erp)
         scroll_layout.addWidget(section_erp)
 
-        # ====== SECTION 4: Advanced Analysis ======
+        # Advanced Analysis Section
         section_advanced = CollapsibleBox("Advanced Analysis", "🔮", expanded=False)
 
         # TFR Card
@@ -346,8 +337,7 @@ class MainWindow(QMainWindow):
 
         scroll_layout.addWidget(section_advanced)
 
-        # ====== ACCORDION BEHAVIOR ======
-        # Track all sections for exclusive expansion
+        # Accordion behavior
         self.sidebar_sections = [section_data, section_ica, section_erp, section_advanced]
         for section in self.sidebar_sections:
             section.expanded.connect(self._on_section_expanded)
@@ -356,7 +346,7 @@ class MainWindow(QMainWindow):
         scroll_area.setWidget(scroll_content)
         sidebar_layout.addWidget(scroll_area)
 
-        # ====== STATUS LOG ======
+        # Status Log
         self.status_log = StatusLog()
         self.log_area = self.status_log.log_area
         sidebar_layout.addWidget(self.status_log)
@@ -364,7 +354,7 @@ class MainWindow(QMainWindow):
         # Add Sidebar to Splitter
         splitter.addWidget(sidebar_widget)
 
-        # ====== MAIN CONTENT CONTENT ======
+        # Main Content
         self.tabs = QTabWidget()
 
         self.tab_signal = QWidget()
@@ -400,10 +390,6 @@ class MainWindow(QMainWindow):
         
         # Splitter Stretch
         splitter.setStretchFactor(1, 4)
-
-    # -------------------------------------------------------------------------
-    # UI Interactions
-    # -------------------------------------------------------------------------
 
     def _on_section_expanded(self, expanded_section):
         """Collapse all sections except the one being expanded (accordion behavior)."""
@@ -713,10 +699,6 @@ class MainWindow(QMainWindow):
             ica_solution.plot_components(show=True)
         except Exception as e:
             self.show_error(f"Plotting Error: {e}")
-
-    # -------------------------------------------------------------------------
-    # Advanced Analysis Slots
-    # -------------------------------------------------------------------------
 
     def compute_tfr_click(self):
         ch = self.combo_channels.currentText()

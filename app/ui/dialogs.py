@@ -1,11 +1,4 @@
-"""
-Dialog Components Module
-
-Contains all dialog and popup windows:
-- DatasetInfoDialog: Shows dataset metadata and event statistics
-- ConnectivityDialog: Displays connectivity plots
-- ERPViewer: Interactive ERP analysis window
-"""
+"""Dialog Components - Dataset info, connectivity plots, and ERP viewer."""
 
 import os
 from typing import List, Tuple
@@ -26,10 +19,7 @@ from .canvas import MplCanvas
 
 
 class ConnectivityDialog(QDialog):
-    """
-    Popup Window for displaying Connectivity Plots.
-    Uses its own FigureCanvas to show the circular graph.
-    """
+    """Popup window for displaying connectivity plots."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,7 +33,7 @@ class ConnectivityDialog(QDialog):
         self.layout.addWidget(self.btn_close)
 
     def plot(self, fig):
-        """Displays the given Matplotlib Figure."""
+        """Display the given Matplotlib Figure."""
         if self.canvas:
             self.layout.removeWidget(self.canvas)
             self.canvas.deleteLater()
@@ -56,10 +46,7 @@ class ConnectivityDialog(QDialog):
 
 
 class DatasetInfoDialog(QDialog):
-    """
-    Dialog displaying comprehensive metadata about the loaded EEG dataset.
-    Includes General Info and Event Statistics tabs for quality control.
-    """
+    """Dialog displaying dataset metadata and event statistics."""
 
     def __init__(self, raw: mne.io.BaseRaw, parent=None, pipeline_history: list = None):
         super().__init__(parent)
@@ -75,7 +62,6 @@ class DatasetInfoDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Tab widget for different info categories
         tabs = QTabWidget()
         tabs.setStyleSheet("""
             QTabWidget::pane {
@@ -88,7 +74,7 @@ class DatasetInfoDialog(QDialog):
             }
         """)
 
-        # --- Tab 1: General Info ---
+        # General Info Tab
         tab_general = QWidget()
         form_layout = QVBoxLayout(tab_general)
         form_layout.setSpacing(16)
@@ -113,7 +99,7 @@ class DatasetInfoDialog(QDialog):
         form_layout.addStretch()
         tabs.addTab(tab_general, "General Info")
 
-        # --- Tab 2: Event Statistics ---
+        # Event Statistics Tab
         tab_events = QWidget()
         events_layout = QVBoxLayout(tab_events)
         events_layout.setContentsMargins(0, 0, 0, 0)
@@ -135,7 +121,7 @@ class DatasetInfoDialog(QDialog):
 
         tabs.addTab(tab_events, "Event Statistics")
 
-        # --- Tab 3: Processing History ---
+        # Processing History Tab
         tab_history = QWidget()
         history_layout = QVBoxLayout(tab_history)
         history_layout.setContentsMargins(16, 16, 16, 16)
@@ -161,27 +147,6 @@ class DatasetInfoDialog(QDialog):
             history_text.setPlainText("No processing steps recorded yet.")
         history_layout.addWidget(history_text)
 
-        # Copy to clipboard button
-        btn_copy = QPushButton("Copy to Clipboard")
-        btn_copy.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_copy.setStyleSheet("""
-            QPushButton {
-                background-color: #1c1c28;
-                border: 1px solid #2a2a40;
-                color: #c8c8e0;
-                padding: 8px 16px;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #252538;
-                color: #ffffff;
-                border-color: #00a8e8;
-            }
-            QPushButton:pressed {
-                background-color: #00a8e8;
-            }
-        """)
-        btn_copy.clicked.connect(lambda: QApplication.clipboard().setText(history_text.toPlainText()))
         history_layout.addWidget(btn_copy)
 
         tabs.addTab(tab_history, "Processing History")
@@ -224,7 +189,6 @@ class DatasetInfoDialog(QDialog):
         info = self.raw.info
         info_pairs = []
 
-        # File path
         filenames = self.raw.filenames
         if filenames:
             filename = os.path.basename(filenames[0])
@@ -232,7 +196,6 @@ class DatasetInfoDialog(QDialog):
             filename = "Unknown"
         info_pairs.append(("File", filename))
 
-        # Measurement date
         meas_date = info.get("meas_date")
         if meas_date is not None:
             date_str = meas_date.strftime("%Y-%m-%d %H:%M:%S")
@@ -240,17 +203,14 @@ class DatasetInfoDialog(QDialog):
             date_str = "Not recorded"
         info_pairs.append(("Meas Date", date_str))
 
-        # Duration
         duration_sec = self.raw.times[-1]
         minutes = int(duration_sec // 60)
         seconds = int(duration_sec % 60)
         info_pairs.append(("Duration", f"{minutes:02d}:{seconds:02d} ({duration_sec:.1f}s)"))
 
-        # Sampling rate
         sfreq = info.get("sfreq", 0)
         info_pairs.append(("Sampling Rate", f"{sfreq:.1f} Hz"))
 
-        # Channels summary
         ch_types_count = {}
         for ch in info["chs"]:
             ch_type = mne.channel_type(info, info["ch_names"].index(ch["ch_name"]))
@@ -260,7 +220,6 @@ class DatasetInfoDialog(QDialog):
         type_summary = ", ".join(f"{count} {t.upper()}" for t, count in ch_types_count.items())
         info_pairs.append(("Channels", f"{total_chs} ({type_summary})"))
 
-        # Filter settings
         highpass = info.get("highpass", 0)
         lowpass = info.get("lowpass", 0)
         info_pairs.append(("High-pass", f"{highpass:.2f} Hz" if highpass else "DC"))
@@ -269,7 +228,7 @@ class DatasetInfoDialog(QDialog):
         return info_pairs
 
     def _create_event_table(self):
-        """Create a table widget displaying event type counts."""
+        """Create table widget displaying event type counts."""
         table = QTableWidget()
         table.setColumnCount(2)
         table.setHorizontalHeaderLabels(["Event Type/ID", "Count"])
@@ -278,7 +237,6 @@ class DatasetInfoDialog(QDialog):
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.setAlternatingRowColors(True)
 
-        # Get events from annotations
         try:
             events, event_id = mne.events_from_annotations(self.raw, verbose=False)
             event_counts = {}
@@ -286,7 +244,6 @@ class DatasetInfoDialog(QDialog):
                 eid = event[2]
                 event_counts[eid] = event_counts.get(eid, 0) + 1
 
-            # Invert event_id dict for name lookup
             id_to_name = {v: k for k, v in event_id.items()}
 
             table.setRowCount(len(event_counts))
@@ -304,14 +261,7 @@ class DatasetInfoDialog(QDialog):
 
 
 class ERPViewer(QMainWindow):
-    """
-    Dedicated Window for Interactive ERP Analysis.
-    Displays:
-    1. Butterfly Plot (Top) - Temporal view of all sensors.
-    2. Topomap (Bottom) - Spatial view at a specific time point.
-    Controls:
-    - Time Slider to scrub through the epoch.
-    """
+    """Interactive ERP analysis window with butterfly plot and topomap."""
 
     def __init__(self, evoked, parent=None):
         super().__init__(parent)
@@ -401,7 +351,7 @@ class ERPViewer(QMainWindow):
         main_layout.addWidget(splitter)
 
     def plot_initial_state(self):
-        """Draws the static Butterfly plot and initial Topomap."""
+        """Draw the static butterfly plot and initial topomap."""
         ax = self.butterfly_canvas.axes
         ax.clear()
 

@@ -1,18 +1,4 @@
-"""
-Sidebar Components Module for NeuroFlow
-
-Contains styled sidebar widgets with "Neural Elegance" theme:
-A refined, scientific visualization aesthetic with subtle depth,
-precise typography, and sophisticated micro-interactions.
-
-Components:
-- SectionCard: Card-style container for grouped controls
-- ParamRow: Clean parameter input row
-- ActionButton: Styled action buttons with states
-- CollapsibleBox: Collapsible section with smooth animations
-- StatusLog: Terminal-style log display
-- SidebarTitle: App branding header
-"""
+"""Sidebar Components - Styled widgets with Neural Elegance theme."""
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -23,30 +9,19 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QEven
 from PyQt6.QtGui import QColor, QFont
 
 
-# =============================================================================
-# SCROLL-DISABLED INPUT WIDGETS
-# Prevents mouse wheel from changing values when scrolling over inputs
-# =============================================================================
-
 class NoScrollComboBox(QComboBox):
     """ComboBox that ignores wheel events to allow parent scrolling."""
     def wheelEvent(self, event):
-        event.ignore()  # Pass to parent for scrolling
+        event.ignore()
 
 
 class NoScrollSpinBox(QDoubleSpinBox):
     """DoubleSpinBox that ignores wheel events to allow parent scrolling."""
     def wheelEvent(self, event):
-        event.ignore()  # Pass to parent for scrolling
+        event.ignore()
 
 
-# =============================================================================
-# DESIGN SYSTEM - Neural Elegance Theme
-# =============================================================================
-
-# Color Palette - Deep space with electric cyan accents
 COLORS = {
-    # Backgrounds (darkest to lightest)
     'bg_void': '#05060a',
     'bg_deep': '#0a0c14',
     'bg_base': '#0e1018',
@@ -54,46 +29,36 @@ COLORS = {
     'bg_surface': '#1a1d2a',
     'bg_hover': '#222638',
 
-    # Borders
     'border_subtle': '#1e2233',
     'border_default': '#262b3d',
     'border_focus': '#00b4d8',
 
-    # Text
     'text_primary': '#e8eaf0',
     'text_secondary': '#9498a8',
     'text_muted': '#5c6070',
     'text_accent': '#00d4ff',
 
-    # Accent colors
     'accent_primary': '#00b4d8',
     'accent_glow': '#00d4ff',
     'accent_dim': '#0080a0',
 
-    # Status
     'success': '#00c896',
     'warning': '#f0a030',
     'error': '#e85050',
 }
 
-# Typography
 FONTS = {
     'display': 'Segoe UI, SF Pro Display, system-ui',
     'body': 'Segoe UI, SF Pro Text, system-ui',
     'mono': 'JetBrains Mono, Cascadia Code, Consolas, monospace',
 }
 
-# Layout constants
 LABEL_WIDTH = 55
 WIDGET_SPACING = 8
 CONTENT_MARGINS = (10, 8, 10, 10)
 CARD_MARGINS = (12, 12, 12, 14)
 BORDER_RADIUS = 10
 
-
-# =============================================================================
-# SHARED STYLES
-# =============================================================================
 
 LABEL_STYLE = f"""
     QLabel {{
@@ -204,15 +169,8 @@ SPINBOX_STYLE = f"""
 """
 
 
-# =============================================================================
-# COMPONENTS
-# =============================================================================
-
 class SectionHeader(QWidget):
-    """
-    Refined section header with icon and title.
-    Features a subtle glow effect on the accent icon.
-    """
+    """Section header with icon and title."""
 
     def __init__(self, title: str, icon: str = "", parent=None):
         super().__init__(parent)
@@ -247,10 +205,7 @@ class SectionHeader(QWidget):
 
 
 class SectionCard(QFrame):
-    """
-    Card-style container with subtle gradient background
-    and refined border treatment.
-    """
+    """Card-style container with gradient background."""
 
     def __init__(self, title: str = "", icon: str = "", parent=None):
         super().__init__(parent)
@@ -297,9 +252,7 @@ class SectionCard(QFrame):
 
 
 class ParamRow(QWidget):
-    """
-    Clean parameter input row with fixed-width label.
-    """
+    """Parameter input row with fixed-width label."""
 
     valueChanged = pyqtSignal(str)
 
@@ -333,9 +286,7 @@ class ParamRow(QWidget):
 
 
 class ParamComboRow(QWidget):
-    """
-    Horizontal row with fixed-width label and styled QComboBox.
-    """
+    """Row with fixed-width label and styled ComboBox."""
 
     currentIndexChanged = pyqtSignal(int)
 
@@ -361,9 +312,7 @@ class ParamComboRow(QWidget):
 
 
 class ParamSpinRow(QWidget):
-    """
-    Parameter row with styled double spin boxes for range inputs.
-    """
+    """Parameter row with double spin boxes for range inputs."""
 
     def __init__(self, label: str, min_val: float, max_val: float,
                  default_min: float, default_max: float, parent=None):
@@ -401,10 +350,7 @@ class ParamSpinRow(QWidget):
 
 
 class ActionButton(QPushButton):
-    """
-    Refined action button with primary/secondary variants.
-    Features subtle gradient backgrounds and smooth hover states.
-    """
+    """Action button with primary/secondary variants."""
 
     def __init__(self, text: str, primary: bool = False, parent=None):
         super().__init__(text, parent)
@@ -473,9 +419,7 @@ class ActionButton(QPushButton):
 
 
 class StatusLog(QFrame):
-    """
-    Terminal-style status log with refined monospace typography.
-    """
+    """Terminal-style status log display."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -486,7 +430,6 @@ class StatusLog(QFrame):
         layout.setContentsMargins(8, 12, 8, 8)
         layout.setSpacing(8)
 
-        # Header with subtle styling
         header = QLabel("◆ STATUS LOG")
         header.setStyleSheet(f"""
             QLabel {{
@@ -501,7 +444,6 @@ class StatusLog(QFrame):
         """)
         layout.addWidget(header)
 
-        # Log area with terminal aesthetic
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
         self.log_area.setMinimumHeight(110)
@@ -547,10 +489,7 @@ class StatusLog(QFrame):
 
 
 class CollapsibleBox(QFrame):
-    """
-    Collapsible accordion section with refined styling.
-    Features smooth toggle animation and distinctive header treatment.
-    """
+    """Collapsible accordion section with smooth toggle."""
 
     expanded = pyqtSignal(object)
 
@@ -644,10 +583,7 @@ class CollapsibleBox(QFrame):
 
 
 class SidebarTitle(QWidget):
-    """
-    App branding header with distinctive typography.
-    Features the NeuroFlow brand with neural network motif.
-    """
+    """App branding header with NeuroFlow title."""
 
     def __init__(self, parent=None):
         super().__init__(parent)

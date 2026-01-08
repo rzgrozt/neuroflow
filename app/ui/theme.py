@@ -1,13 +1,4 @@
-"""
-Modern Theme Module for NeuroFlow
-
-Contains:
-- ModernAboutDialog: Premium frameless about dialog with neural-inspired design
-- apply_modern_theme: Comprehensive QSS styling for the entire application
-
-Design Philosophy: "Neural Elegance" - Clinical precision meets premium software.
-Inspired by brain scan imagery, neural networks, and high-end scientific equipment.
-"""
+"""Theme Module - Modern dark theme and About dialog for NeuroFlow."""
 
 import math
 from PyQt6.QtWidgets import (
@@ -21,10 +12,7 @@ from PyQt6.QtGui import (
 
 
 class NeuralBackgroundWidget(QWidget):
-    """
-    Animated neural network background with floating nodes and synaptic connections.
-    Creates an organic, living background that evokes brain activity.
-    """
+    """Animated neural network background with floating nodes and connections."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -32,7 +20,6 @@ class NeuralBackgroundWidget(QWidget):
         self.nodes = []
         self.time_offset = 0.0
 
-        # Generate neural nodes with varied properties
         for i in range(14):
             self.nodes.append({
                 'x': 30 + (i % 5) * 95 + (i * 17) % 40,
@@ -43,7 +30,6 @@ class NeuralBackgroundWidget(QWidget):
                 'pulse_phase': i * 0.3,
             })
 
-        # Animation timer for organic movement
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._animate)
         self.timer.start(50)
@@ -56,7 +42,6 @@ class NeuralBackgroundWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Draw synaptic connections between nearby nodes
         for i, node1 in enumerate(self.nodes):
             for j, node2 in enumerate(self.nodes[i+1:], i+1):
                 x1 = node1['x'] + math.sin(self.time_offset * node1['speed'] + node1['phase']) * 12
@@ -78,7 +63,6 @@ class NeuralBackgroundWidget(QWidget):
                     painter.setPen(pen)
                     painter.drawLine(int(x1), int(y1), int(x2), int(y2))
 
-        # Draw neural nodes with glow effect
         for node in self.nodes:
             x = node['x'] + math.sin(self.time_offset * node['speed'] + node['phase']) * 12
             y = node['y'] + math.cos(self.time_offset * node['speed'] * 0.7 + node['phase']) * 10
@@ -86,7 +70,6 @@ class NeuralBackgroundWidget(QWidget):
             pulse = 0.6 + 0.4 * math.sin(self.time_offset * 1.0 + node['pulse_phase'])
             radius = node['radius'] * (0.8 + 0.4 * pulse)
 
-            # Outer glow
             for r in range(3, 0, -1):
                 glow_opacity = int(20 * (4 - r) * pulse)
                 painter.setPen(Qt.PenStyle.NoPen)
@@ -94,15 +77,12 @@ class NeuralBackgroundWidget(QWidget):
                 painter.drawEllipse(int(x - radius - r * 3), int(y - radius - r * 3),
                                    int((radius + r * 3) * 2), int((radius + r * 3) * 2))
 
-            # Core node
             painter.setBrush(QColor(0, 200, 255, int(200 * pulse)))
             painter.drawEllipse(int(x - radius), int(y - radius), int(radius * 2), int(radius * 2))
 
 
 class ModernAboutDialog(QDialog):
-    """
-    Premium frameless About dialog with neural-inspired aesthetics.
-    """
+    """Premium frameless About dialog with neural-inspired aesthetics."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -119,7 +99,6 @@ class ModernAboutDialog(QDialog):
         self._apply_shadow()
 
     def _init_ui(self):
-        # Main container
         self.container = QWidget(self)
         self.container.setObjectName("aboutContainer")
         self.container.setGeometry(0, 0, 480, 420)
@@ -136,16 +115,13 @@ class ModernAboutDialog(QDialog):
             }
         """)
 
-        # Neural network background
         self.neural_bg = NeuralBackgroundWidget(self.container)
         self.neural_bg.setGeometry(0, 0, 480, 420)
 
-        # Main layout
         layout = QVBoxLayout(self.container)
         layout.setContentsMargins(36, 28, 36, 32)
         layout.setSpacing(12)
 
-        # Close button
         close_btn = QPushButton("×", self.container)
         close_btn.setFixedSize(36, 36)
         close_btn.move(436, 10)
@@ -166,13 +142,11 @@ class ModernAboutDialog(QDialog):
         close_btn.clicked.connect(self.close)
         close_btn.raise_()
 
-        # Brain icon
         icon_label = QLabel("🧠")
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_label.setStyleSheet("font-size: 56px; background: transparent;")
         layout.addWidget(icon_label)
 
-        # App name - using styled QLabel instead of custom paint
         name_label = QLabel("NeuroFlow")
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_label.setStyleSheet("""
@@ -188,7 +162,6 @@ class ModernAboutDialog(QDialog):
         """)
         layout.addWidget(name_label)
 
-        # Version badge
         version_container = QWidget()
         version_layout = QHBoxLayout(version_container)
         version_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -210,7 +183,6 @@ class ModernAboutDialog(QDialog):
         version_layout.addWidget(version_label)
         layout.addWidget(version_container)
 
-        # Description
         desc_label = QLabel(
             "Professional-grade EEG signal analysis platform.\n"
             "Preprocessing • ICA • ERP • TFR • Connectivity"
@@ -226,7 +198,6 @@ class ModernAboutDialog(QDialog):
         """)
         layout.addWidget(desc_label)
 
-        # Powered by
         powered_label = QLabel("Powered by MNE-Python & PyQt6")
         powered_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         powered_label.setStyleSheet("""
@@ -241,7 +212,6 @@ class ModernAboutDialog(QDialog):
 
         layout.addSpacerItem(QSpacerItem(20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
-        # Links
         links_widget = QWidget()
         links_layout = QHBoxLayout(links_widget)
         links_layout.setSpacing(16)
@@ -285,7 +255,6 @@ class ModernAboutDialog(QDialog):
         links_layout.addWidget(linkedin_btn)
         layout.addWidget(links_widget)
 
-        # Footer
         footer_label = QLabel("© 2026 Ruzgar Ozturk  •  Open Source MIT License")
         footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         footer_label.setStyleSheet("""
@@ -320,11 +289,7 @@ class ModernAboutDialog(QDialog):
 
 
 def apply_modern_theme(app: QApplication) -> None:
-    """
-    Applies a comprehensive modern dark theme to the entire application.
-
-    Design: "Neural Elegance" - Clinical precision meets premium software.
-    """
+    """Apply comprehensive modern dark theme to the application."""
 
     qss = """
     /* ========================================

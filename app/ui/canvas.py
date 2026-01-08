@@ -1,8 +1,4 @@
-"""
-Matplotlib Canvas Module
-
-Contains the MplCanvas class for embedding Matplotlib figures in PyQt6.
-"""
+"""Matplotlib Canvas for PyQt6 integration."""
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -10,10 +6,7 @@ from matplotlib.figure import Figure
 
 
 class MplCanvas(FigureCanvasQTAgg):
-    """
-    Matplotlib canvas widget for PyQt6 integration.
-    Uses dark background styling for consistency with the application theme.
-    """
+    """Matplotlib canvas widget with dark theme styling."""
 
     def __init__(self, parent=None, width=5, height=4, dpi=100):
         plt.style.use('dark_background')

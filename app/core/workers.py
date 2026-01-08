@@ -1,9 +1,4 @@
-"""
-EEG Processing Worker Module
-
-Contains the EEGWorker class responsible for all MNE-Python processing tasks
-running on a separate thread to keep the GUI responsive.
-"""
+"""EEG Processing Worker - Handles MNE-Python tasks on a separate thread."""
 
 import os
 import traceback
@@ -25,10 +20,7 @@ logger = logging.getLogger("NeuroFlow")
 
 
 class EEGWorker(QObject):
-    """
-    Worker class for handling heavy MNE-Python analysis tasks on a separate thread.
-    This ensures the GUI remains responsive during data loading and signal processing.
-    """
+    """Worker for MNE-Python analysis tasks on a separate thread."""
     finished = pyqtSignal()
     error_occurred = pyqtSignal(str)
     log_message = pyqtSignal(str)
@@ -50,10 +42,7 @@ class EEGWorker(QObject):
 
     @pyqtSlot(str)
     def load_data(self, file_path: str):
-        """
-        Loads EEG data from .vhdr (BrainVision), .fif, or .edf files.
-        Applies standard montage if channel positions are missing.
-        """
+        """Load EEG data from .vhdr, .fif, or .edf files."""
         filename = os.path.basename(file_path)
         self.log_message.emit(f"Function: load_data | Loading: {filename}")
 
@@ -119,19 +108,13 @@ class EEGWorker(QObject):
 
     @pyqtSlot(float, float, float)
     def run_pipeline(self, l_freq: float, h_freq: float, notch_freq: float):
-        """
-        Runs the preprocessing pipeline: Filtering -> PSD Calculation.
-
-        l_freq: Lower pass-band edge (High-pass filter value).
-        h_freq: Upper pass-band edge (Low-pass filter value).
-        """
+        """Run preprocessing pipeline: Filtering -> PSD Calculation."""
         if self.raw is None:
             self.error_occurred.emit("No data loaded. Please load a dataset first.")
             return
 
         self.log_message.emit("Starting preprocessing pipeline...")
 
-        # Operate on a copy to preserve original data state
         result_raw = self.raw.copy()
 
         try:
@@ -173,9 +156,7 @@ class EEGWorker(QObject):
 
     @pyqtSlot()
     def run_ica(self):
-        """
-        Fits ICA on the CURRENTLY filtered data (or raw if no filter).
-        """
+        """Fit ICA on the current data."""
         if self.raw is None:
             self.error_occurred.emit("No data loaded. Cannot run ICA.")
             return
@@ -202,9 +183,7 @@ class EEGWorker(QObject):
 
     @pyqtSlot(str)
     def apply_ica(self, exclude_str: str):
-        """
-        Apply ICA with excluded components and re-compute PSD.
-        """
+        """Apply ICA with excluded components and re-compute PSD."""
         if self.ica is None:
             self.error_occurred.emit("ICA has not been calculated yet.")
             return
@@ -239,9 +218,7 @@ class EEGWorker(QObject):
 
     @pyqtSlot(str, float, float)
     def compute_erp(self, event_name: str, tmin: float, tmax: float):
-        """
-        Epochs the data around a specific event trigger and averages them to create an ERP.
-        """
+        """Epoch data around event trigger and average to create ERP."""
         if self.raw is None:
             self.error_occurred.emit("No data loaded.")
             return
@@ -276,10 +253,7 @@ class EEGWorker(QObject):
 
     @pyqtSlot(str, float, float)
     def compute_tfr(self, ch_name: str, l_freq: float, h_freq: float, n_cycles_div: int = 2):
-        """
-        Computes Time-Frequency Representation (TFR) using Morlet wavelets.
-        Uses fixed-length epochs from continuous data for robust computation.
-        """
+        """Compute Time-Frequency Representation using Morlet wavelets."""
         if self.raw is None:
             self.error_occurred.emit("No data loaded.")
             return
@@ -289,7 +263,6 @@ class EEGWorker(QObject):
         )
 
         try:
-            # Verify channel exists
             if ch_name not in self.raw.ch_names:
                 self.error_occurred.emit(f"Channel '{ch_name}' not found in data.")
                 return
@@ -297,12 +270,9 @@ class EEGWorker(QObject):
             freqs = np.arange(l_freq, h_freq + 1, 1.0)
             n_cycles = freqs / n_cycles_div
 
-            # Create a copy of raw with only the selected channel for efficiency
             raw_pick = self.raw.copy().pick([ch_name])
 
-            # Use fixed-length epochs for robust TFR computation
-            # This avoids issues with event-based epoching
-            epoch_duration = 2.0  # 2-second epochs
+            epoch_duration = 2.0
             epochs = mne.make_fixed_length_epochs(
                 raw_pick,
                 duration=epoch_duration,
@@ -318,7 +288,6 @@ class EEGWorker(QObject):
 
             self.log_message.emit(f"Created {len(epochs)} epochs for TFR analysis...")
 
-            # Compute TFR using modern API
             power = epochs.compute_tfr(
                 method='morlet',
                 freqs=freqs,
@@ -337,10 +306,7 @@ class EEGWorker(QObject):
 
     @pyqtSlot(str)
     def save_data(self, filename: str):
-        """
-        Saves the CURRENT raw object to a .fif file.
-        Runs in the worker thread to avoid freezing UI.
-        """
+        """Save the current raw object to a .fif file."""
         if self.raw is None:
             self.error_occurred.emit("No data to save.")
             return
@@ -360,10 +326,7 @@ class EEGWorker(QObject):
 
     @pyqtSlot()
     def compute_connectivity(self):
-        """
-        Computes Functional Connectivity using wPLI (Weighted Phase Lag Index).
-        Targeting Alpha Band (8-12Hz) by default for MVP.
-        """
+        """Compute Functional Connectivity using wPLI in Alpha Band (8-12Hz)."""
         if self.raw is None:
             self.error_occurred.emit("No data loaded.")
             return
