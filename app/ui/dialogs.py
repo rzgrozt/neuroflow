@@ -51,7 +51,7 @@ class ConnectivityDialog(QDialog):
         self.canvas = FigureCanvasQTAgg(fig)
         self.layout.insertWidget(0, self.canvas)
 
-        fig.patch.set_facecolor('#2b2b2b')
+        fig.patch.set_facecolor('#1e1e1e')
         self.canvas.draw()
 
 
@@ -72,24 +72,40 @@ class DatasetInfoDialog(QDialog):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         # Tab widget for different info categories
         tabs = QTabWidget()
+        tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #252538;
+                border-radius: 0px;
+                top: -1px; 
+            }
+            QTabBar::tab {
+                min-width: 120px;
+            }
+        """)
 
         # --- Tab 1: General Info ---
         tab_general = QWidget()
         form_layout = QVBoxLayout(tab_general)
-        form_layout.setSpacing(12)
-        form_layout.setContentsMargins(15, 15, 15, 15)
+        form_layout.setSpacing(16)
+        form_layout.setContentsMargins(24, 24, 24, 24)
 
         info_pairs = self._get_general_info()
         for label_text, value_text in info_pairs:
             row = QHBoxLayout()
-            label = QLabel(f"<b>{label_text}:</b>")
-            label.setFixedWidth(120)
+            label = QLabel(f"{label_text}:")
+            label.setFixedWidth(130)
+            label.setStyleSheet("color: #9090a8; font-weight: 600; font-size: 13px;")
+            
             value = QLabel(value_text)
             value.setWordWrap(True)
             value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            value.setStyleSheet("color: #e0e0f0; font-size: 13px;")
+            
             row.addWidget(label)
             row.addWidget(value, 1)
             form_layout.addLayout(row)
@@ -100,9 +116,21 @@ class DatasetInfoDialog(QDialog):
         # --- Tab 2: Event Statistics ---
         tab_events = QWidget()
         events_layout = QVBoxLayout(tab_events)
-        events_layout.setContentsMargins(10, 10, 10, 10)
+        events_layout.setContentsMargins(0, 0, 0, 0)
 
         self.event_table = self._create_event_table()
+        self.event_table.setStyleSheet("""
+            QTableWidget {
+                border: none;
+                background-color: #0a0a10;
+            }
+            QHeaderView::section {
+                background-color: #12121c;
+                border: none;
+                border-bottom: 1px solid #252538;
+                padding: 8px;
+            }
+        """)
         events_layout.addWidget(self.event_table)
 
         tabs.addTab(tab_events, "Event Statistics")
@@ -110,12 +138,23 @@ class DatasetInfoDialog(QDialog):
         # --- Tab 3: Processing History ---
         tab_history = QWidget()
         history_layout = QVBoxLayout(tab_history)
-        history_layout.setContentsMargins(10, 10, 10, 10)
+        history_layout.setContentsMargins(16, 16, 16, 16)
+        history_layout.setSpacing(12)
 
         import json
         history_text = QTextEdit()
         history_text.setReadOnly(True)
-        history_text.setFont(QFont("Consolas", 9))
+        history_text.setFont(QFont("JetBrains Mono", 12))
+        history_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #08080c;
+                border: 1px solid #252538;
+                border-radius: 8px;
+                padding: 12px;
+                color: #a0a0b8;
+            }
+        """)
+        
         if self.pipeline_history:
             history_text.setPlainText(json.dumps(self.pipeline_history, indent=2))
         else:
@@ -124,6 +163,24 @@ class DatasetInfoDialog(QDialog):
 
         # Copy to clipboard button
         btn_copy = QPushButton("Copy to Clipboard")
+        btn_copy.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_copy.setStyleSheet("""
+            QPushButton {
+                background-color: #1c1c28;
+                border: 1px solid #2a2a40;
+                color: #c8c8e0;
+                padding: 8px 16px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #252538;
+                color: #ffffff;
+                border-color: #00a8e8;
+            }
+            QPushButton:pressed {
+                background-color: #00a8e8;
+            }
+        """)
         btn_copy.clicked.connect(lambda: QApplication.clipboard().setText(history_text.toPlainText()))
         history_layout.addWidget(btn_copy)
 
@@ -131,10 +188,36 @@ class DatasetInfoDialog(QDialog):
 
         layout.addWidget(tabs)
 
-        # Close button
+        # Bottom Bar
+        bottom_bar = QWidget()
+        bottom_bar.setStyleSheet("background-color: #151520; border-top: 1px solid #252538;")
+        bottom_layout = QHBoxLayout(bottom_bar)
+        bottom_layout.setContentsMargins(16, 12, 16, 12)
+        bottom_layout.addStretch()
+
         btn_close = QPushButton("Close")
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setFixedWidth(100)
+        btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: #0080b8;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #0090cc;
+            }
+            QPushButton:pressed {
+                background-color: #0070a0;
+            }
+        """)
         btn_close.clicked.connect(self.accept)
-        layout.addWidget(btn_close)
+        bottom_layout.addWidget(btn_close)
+        
+        layout.addWidget(bottom_bar)
 
     def _get_general_info(self) -> List[Tuple[str, str]]:
         """Extract general metadata from the raw object."""
@@ -252,22 +335,29 @@ class ERPViewer(QMainWindow):
 
     def apply_dark_theme(self):
         self.setStyleSheet("""
-            QMainWindow { background-color: #2b2b2b; }
+            QMainWindow { background-color: #0d0d12; }
             QLabel { color: #ffffff; font-size: 14px; font-weight: bold; }
             QSlider::groove:horizontal {
-                border: 1px solid #555;
+                border: 1px solid #282840;
                 height: 8px;
-                background: #1e1e1e;
+                background: #181824;
                 margin: 2px 0;
                 border-radius: 4px;
             }
             QSlider::handle:horizontal {
-                background: #007acc;
-                border: 1px solid #555;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #00d4ff, stop:1 #0090c0);
+                border: 1px solid #282840;
                 width: 18px;
                 height: 18px;
                 margin: -7px 0;
                 border-radius: 9px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #00e4ff;
+            }
+            QSlider::sub-page:horizontal {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #005080, stop:1 #00a8e8);
+                border-radius: 4px;
             }
         """)
 

@@ -110,6 +110,9 @@ class SectionCard(QFrame):
                 border: 1px solid #252538;
                 border-radius: 12px;
             }
+            #sectionCard:hover {
+                border: 1px solid #00a8e8;
+            }
         """)
 
     def addWidget(self, widget):
@@ -257,13 +260,17 @@ class ActionButton(QPushButton):
                     padding: 8px 12px;
                     font-weight: 600;
                     font-size: 12px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
                 }
                 QPushButton:hover {
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                         stop:0 #0090cc, stop:1 #00b8f8);
+                    margin-top: -1px;
                 }
                 QPushButton:pressed {
                     background: #0070a0;
+                    margin-top: 1px;
                 }
                 QPushButton:disabled {
                     background: #1a1a28;
