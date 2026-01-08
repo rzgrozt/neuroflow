@@ -195,7 +195,7 @@ class MainWindow(QMainWindow):
 
         # ====== SIDEBAR WIDGET ======
         sidebar_widget = QWidget()
-        sidebar_widget.setFixedWidth(300)
+        sidebar_widget.setFixedWidth(330)
         
         sidebar_layout = QVBoxLayout(sidebar_widget)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
@@ -540,15 +540,20 @@ class MainWindow(QMainWindow):
         self.combo_events.clear()
         self.epochs = None  # Reset epochs when new data is loaded
         self.epochs_inspected = False
+
         if not event_id_dict:
             self.log_status("No events found for ERP analysis.")
             self.btn_erp.setEnabled(False)
             self.btn_inspect_epochs.setEnabled(False)
             return
 
-        self.combo_events.addItems(list(event_id_dict.keys()))
-        self.btn_inspect_epochs.setEnabled(True)  # Enable inspection button
-        self.btn_erp.setEnabled(True)  # Allow ERP without inspection (optional workflow)
+        event_names = list(event_id_dict.keys())
+
+        # Populate ERP dropdown
+        self.combo_events.addItems(event_names)
+        self.btn_inspect_epochs.setEnabled(True)
+        self.btn_erp.setEnabled(True)
+
         self.log_status(f"Populated ERP dropdown with {len(event_id_dict)} events.")
 
     def inspect_epochs_click(self):

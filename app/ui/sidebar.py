@@ -2,74 +2,245 @@
 Sidebar Components Module for NeuroFlow
 
 Contains styled sidebar widgets with "Neural Elegance" theme:
+A refined, scientific visualization aesthetic with subtle depth,
+precise typography, and sophisticated micro-interactions.
+
+Components:
 - SectionCard: Card-style container for grouped controls
 - ParamRow: Clean parameter input row
 - ActionButton: Styled action buttons with states
-- CollapsibleBox: Collapsible section with triangle toggle icons
-- StyledSidebar: Complete sidebar widget assembly
+- CollapsibleBox: Collapsible section with smooth animations
+- StatusLog: Terminal-style log display
+- SidebarTitle: App branding header
 """
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QLineEdit, QComboBox, QDoubleSpinBox, QTextEdit,
-    QScrollArea, QSizePolicy
+    QScrollArea, QSizePolicy, QGraphicsDropShadowEffect
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QEvent
+from PyQt6.QtGui import QColor, QFont
 
 
 # =============================================================================
-# STYLE CONSTANTS - Single source of truth for consistent styling
+# SCROLL-DISABLED INPUT WIDGETS
+# Prevents mouse wheel from changing values when scrolling over inputs
 # =============================================================================
+
+class NoScrollComboBox(QComboBox):
+    """ComboBox that ignores wheel events to allow parent scrolling."""
+    def wheelEvent(self, event):
+        event.ignore()  # Pass to parent for scrolling
+
+
+class NoScrollSpinBox(QDoubleSpinBox):
+    """DoubleSpinBox that ignores wheel events to allow parent scrolling."""
+    def wheelEvent(self, event):
+        event.ignore()  # Pass to parent for scrolling
+
+
+# =============================================================================
+# DESIGN SYSTEM - Neural Elegance Theme
+# =============================================================================
+
+# Color Palette - Deep space with electric cyan accents
+COLORS = {
+    # Backgrounds (darkest to lightest)
+    'bg_void': '#05060a',
+    'bg_deep': '#0a0c14',
+    'bg_base': '#0e1018',
+    'bg_elevated': '#141620',
+    'bg_surface': '#1a1d2a',
+    'bg_hover': '#222638',
+
+    # Borders
+    'border_subtle': '#1e2233',
+    'border_default': '#262b3d',
+    'border_focus': '#00b4d8',
+
+    # Text
+    'text_primary': '#e8eaf0',
+    'text_secondary': '#9498a8',
+    'text_muted': '#5c6070',
+    'text_accent': '#00d4ff',
+
+    # Accent colors
+    'accent_primary': '#00b4d8',
+    'accent_glow': '#00d4ff',
+    'accent_dim': '#0080a0',
+
+    # Status
+    'success': '#00c896',
+    'warning': '#f0a030',
+    'error': '#e85050',
+}
+
+# Typography
+FONTS = {
+    'display': 'Segoe UI, SF Pro Display, system-ui',
+    'body': 'Segoe UI, SF Pro Text, system-ui',
+    'mono': 'JetBrains Mono, Cascadia Code, Consolas, monospace',
+}
 
 # Layout constants
-LABEL_WIDTH = 50  # Fixed label width for all param rows
-WIDGET_SPACING = 6  # Standard spacing between widgets
-CONTENT_MARGINS = (8, 6, 8, 8)  # Standard content margins (left, top, right, bottom)
-CARD_MARGINS = (10, 10, 10, 10)  # Card internal margins
+LABEL_WIDTH = 55
+WIDGET_SPACING = 8
+CONTENT_MARGINS = (10, 8, 10, 10)
+CARD_MARGINS = (12, 12, 12, 14)
+BORDER_RADIUS = 10
 
-# Label style - shared across all param widgets
-LABEL_STYLE = """
-    QLabel {
-        color: #9090a8;
+
+# =============================================================================
+# SHARED STYLES
+# =============================================================================
+
+LABEL_STYLE = f"""
+    QLabel {{
+        color: {COLORS['text_secondary']};
+        font-family: {FONTS['body']};
         font-size: 12px;
         font-weight: 500;
         background: transparent;
-    }
+        padding: 0;
+    }}
+"""
+
+INPUT_STYLE = f"""
+    QLineEdit {{
+        background: {COLORS['bg_deep']};
+        color: {COLORS['text_primary']};
+        border: 1px solid {COLORS['border_subtle']};
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-family: {FONTS['mono']};
+        font-size: 12px;
+        selection-background-color: {COLORS['accent_dim']};
+    }}
+    QLineEdit:focus {{
+        border-color: {COLORS['accent_primary']};
+        background: {COLORS['bg_base']};
+    }}
+    QLineEdit:disabled {{
+        background: {COLORS['bg_void']};
+        color: {COLORS['text_muted']};
+        border-color: {COLORS['border_subtle']};
+    }}
+"""
+
+COMBO_STYLE = f"""
+    QComboBox {{
+        background: {COLORS['bg_deep']};
+        color: {COLORS['text_primary']};
+        border: 1px solid {COLORS['border_subtle']};
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-family: {FONTS['body']};
+        font-size: 12px;
+        min-height: 18px;
+    }}
+    QComboBox:hover {{
+        border-color: {COLORS['border_default']};
+    }}
+    QComboBox:focus {{
+        border-color: {COLORS['accent_primary']};
+    }}
+    QComboBox::drop-down {{
+        border: none;
+        width: 24px;
+    }}
+    QComboBox::down-arrow {{
+        image: none;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top: 5px solid {COLORS['text_muted']};
+        margin-right: 8px;
+    }}
+    QComboBox:hover::down-arrow {{
+        border-top-color: {COLORS['text_secondary']};
+    }}
+    QComboBox QAbstractItemView {{
+        background: {COLORS['bg_elevated']};
+        color: {COLORS['text_primary']};
+        border: 1px solid {COLORS['border_default']};
+        border-radius: 6px;
+        padding: 4px;
+        selection-background-color: {COLORS['accent_dim']};
+    }}
+"""
+
+SPINBOX_STYLE = f"""
+    QDoubleSpinBox {{
+        background: {COLORS['bg_deep']};
+        color: {COLORS['text_primary']};
+        border: 1px solid {COLORS['border_subtle']};
+        border-radius: 6px;
+        padding: 5px 8px;
+        font-family: {FONTS['mono']};
+        font-size: 12px;
+    }}
+    QDoubleSpinBox:focus {{
+        border-color: {COLORS['accent_primary']};
+    }}
+    QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+        background: transparent;
+        border: none;
+        width: 16px;
+    }}
+    QDoubleSpinBox::up-arrow {{
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-bottom: 4px solid {COLORS['text_muted']};
+    }}
+    QDoubleSpinBox::down-arrow {{
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top: 4px solid {COLORS['text_muted']};
+    }}
+    QDoubleSpinBox::up-arrow:hover, QDoubleSpinBox::down-arrow:hover {{
+        border-bottom-color: {COLORS['text_secondary']};
+        border-top-color: {COLORS['text_secondary']};
+    }}
 """
 
 
+# =============================================================================
+# COMPONENTS
+# =============================================================================
+
 class SectionHeader(QWidget):
     """
-    Modern section header with icon and title.
-    Replaces QGroupBox titles with a cleaner design.
+    Refined section header with icon and title.
+    Features a subtle glow effect on the accent icon.
     """
 
     def __init__(self, title: str, icon: str = "", parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 10)
+        layout.setSpacing(10)
 
         if icon:
             icon_label = QLabel(icon)
-            icon_label.setStyleSheet("""
-                QLabel {
-                    font-size: 16px;
-                    color: #00c8ff;
+            icon_label.setStyleSheet(f"""
+                QLabel {{
+                    font-size: 15px;
+                    color: {COLORS['accent_glow']};
                     background: transparent;
-                }
+                }}
             """)
             layout.addWidget(icon_label)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet("""
-            QLabel {
-                font-size: 13px;
+        title_label.setStyleSheet(f"""
+            QLabel {{
+                font-family: {FONTS['display']};
+                font-size: 12px;
                 font-weight: 600;
-                color: #00c8ff;
+                color: {COLORS['accent_glow']};
                 background: transparent;
-                letter-spacing: 0.5px;
-            }
+                letter-spacing: 0.3px;
+            }}
         """)
         layout.addWidget(title_label)
         layout.addStretch()
@@ -77,8 +248,8 @@ class SectionHeader(QWidget):
 
 class SectionCard(QFrame):
     """
-    Card-style container for grouped controls.
-    Provides a subtle elevated surface with proper spacing.
+    Card-style container with subtle gradient background
+    and refined border treatment.
     """
 
     def __init__(self, title: str = "", icon: str = "", parent=None):
@@ -95,28 +266,26 @@ class SectionCard(QFrame):
             header = SectionHeader(title, icon)
             self.main_layout.addWidget(header)
 
-        # Content layout for child widgets
         self.content_layout = QVBoxLayout()
         self.content_layout.setContentsMargins(0, 0, 0, 0)
         self.content_layout.setSpacing(WIDGET_SPACING)
         self.main_layout.addLayout(self.content_layout)
 
     def _setup_style(self):
-        self.setStyleSheet("""
-            #sectionCard {
+        self.setStyleSheet(f"""
+            #sectionCard {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(26, 26, 40, 0.95),
-                    stop:1 rgba(20, 20, 32, 0.95));
-                border: 1px solid #252538;
-                border-radius: 12px;
-            }
-            #sectionCard:hover {
-                border: 1px solid #00a8e8;
-            }
+                    stop:0 {COLORS['bg_surface']},
+                    stop:1 {COLORS['bg_elevated']});
+                border: 1px solid {COLORS['border_subtle']};
+                border-radius: {BORDER_RADIUS}px;
+            }}
+            #sectionCard:hover {{
+                border-color: {COLORS['border_default']};
+            }}
         """)
 
     def addWidget(self, widget):
-        # Ensure widgets expand horizontally to fill the card width
         widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             widget.sizePolicy().verticalPolicy()
@@ -129,8 +298,7 @@ class SectionCard(QFrame):
 
 class ParamRow(QWidget):
     """
-    Clean parameter input row with label and input field.
-    Used for filter parameters, time ranges, etc.
+    Clean parameter input row with fixed-width label.
     """
 
     valueChanged = pyqtSignal(str)
@@ -142,14 +310,13 @@ class ParamRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(WIDGET_SPACING)
 
-        # Label
         self.label = QLabel(label)
         self.label.setFixedWidth(LABEL_WIDTH)
         self.label.setStyleSheet(LABEL_STYLE)
         layout.addWidget(self.label)
 
-        # Input
         self.input = QLineEdit(default)
+        self.input.setStyleSheet(INPUT_STYLE)
         if placeholder:
             self.input.setPlaceholderText(placeholder)
         self.input.textChanged.connect(self.valueChanged.emit)
@@ -167,8 +334,7 @@ class ParamRow(QWidget):
 
 class ParamComboRow(QWidget):
     """
-    Horizontal row with fixed-width label and flexible QComboBox.
-    Matches ParamRow structure for consistent responsive behavior.
+    Horizontal row with fixed-width label and styled QComboBox.
     """
 
     currentIndexChanged = pyqtSignal(int)
@@ -180,14 +346,13 @@ class ParamComboRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(WIDGET_SPACING)
 
-        # Label
         self.label = QLabel(label)
         self.label.setFixedWidth(LABEL_WIDTH)
         self.label.setStyleSheet(LABEL_STYLE)
         layout.addWidget(self.label)
 
-        # ComboBox (flexible width)
-        self.combo = QComboBox()
+        self.combo = NoScrollComboBox()
+        self.combo.setStyleSheet(COMBO_STYLE)
         self.combo.currentIndexChanged.connect(self.currentIndexChanged.emit)
         layout.addWidget(self.combo)
 
@@ -197,7 +362,7 @@ class ParamComboRow(QWidget):
 
 class ParamSpinRow(QWidget):
     """
-    Parameter row with double spin boxes for range inputs.
+    Parameter row with styled double spin boxes for range inputs.
     """
 
     def __init__(self, label: str, min_val: float, max_val: float,
@@ -206,31 +371,29 @@ class ParamSpinRow(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(6)
 
-        # Label
         lbl = QLabel(label)
         lbl.setFixedWidth(LABEL_WIDTH)
         lbl.setStyleSheet(LABEL_STYLE)
         layout.addWidget(lbl)
 
-        # Min spin
-        self.spin_min = QDoubleSpinBox()
+        self.spin_min = NoScrollSpinBox()
         self.spin_min.setRange(min_val, max_val)
         self.spin_min.setValue(default_min)
+        self.spin_min.setStyleSheet(SPINBOX_STYLE)
         layout.addWidget(self.spin_min)
 
-        # Separator
         sep = QLabel("–")
-        sep.setStyleSheet("color: #606080; background: transparent;")
-        sep.setFixedWidth(12)
+        sep.setStyleSheet(f"color: {COLORS['text_muted']}; background: transparent;")
+        sep.setFixedWidth(14)
         sep.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(sep)
 
-        # Max spin
-        self.spin_max = QDoubleSpinBox()
+        self.spin_max = NoScrollSpinBox()
         self.spin_max.setRange(min_val, max_val)
         self.spin_max.setValue(default_max)
+        self.spin_max.setStyleSheet(SPINBOX_STYLE)
         layout.addWidget(self.spin_max)
 
     def values(self) -> tuple:
@@ -239,7 +402,8 @@ class ParamSpinRow(QWidget):
 
 class ActionButton(QPushButton):
     """
-    Styled action button with primary/secondary variants.
+    Refined action button with primary/secondary variants.
+    Features subtle gradient backgrounds and smooth hover states.
     """
 
     def __init__(self, text: str, primary: bool = False, parent=None):
@@ -250,64 +414,67 @@ class ActionButton(QPushButton):
 
     def _apply_style(self):
         if self._primary:
-            self.setStyleSheet("""
-                QPushButton {
+            self.setStyleSheet(f"""
+                QPushButton {{
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                        stop:0 #0080b8, stop:1 #00a8e8);
+                        stop:0 {COLORS['accent_dim']}, stop:1 {COLORS['accent_primary']});
                     color: #ffffff;
                     border: none;
-                    border-radius: 6px;
-                    padding: 8px 12px;
+                    border-radius: 7px;
+                    padding: 9px 14px;
+                    font-family: {FONTS['display']};
                     font-weight: 600;
                     font-size: 12px;
                     text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                }
-                QPushButton:hover {
+                    letter-spacing: 0.8px;
+                }}
+                QPushButton:hover {{
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                        stop:0 #0090cc, stop:1 #00b8f8);
-                    margin-top: -1px;
-                }
-                QPushButton:pressed {
-                    background: #0070a0;
-                    margin-top: 1px;
-                }
-                QPushButton:disabled {
-                    background: #1a1a28;
-                    color: #454560;
-                }
+                        stop:0 {COLORS['accent_primary']}, stop:1 {COLORS['accent_glow']});
+                }}
+                QPushButton:pressed {{
+                    background: {COLORS['accent_dim']};
+                    padding-top: 10px;
+                    padding-bottom: 8px;
+                }}
+                QPushButton:disabled {{
+                    background: {COLORS['bg_elevated']};
+                    color: {COLORS['text_muted']};
+                }}
             """)
         else:
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: #1c1c28;
-                    color: #c8c8e0;
-                    border: 1px solid #2a2a40;
-                    border-radius: 6px;
-                    padding: 8px 12px;
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    background: {COLORS['bg_elevated']};
+                    color: {COLORS['text_secondary']};
+                    border: 1px solid {COLORS['border_subtle']};
+                    border-radius: 7px;
+                    padding: 9px 14px;
+                    font-family: {FONTS['display']};
                     font-weight: 500;
                     font-size: 12px;
-                }
-                QPushButton:hover {
-                    background-color: #252538;
-                    border-color: #00a8e8;
+                }}
+                QPushButton:hover {{
+                    background: {COLORS['bg_hover']};
+                    border-color: {COLORS['accent_primary']};
+                    color: {COLORS['text_primary']};
+                }}
+                QPushButton:pressed {{
+                    background: {COLORS['accent_dim']};
+                    border-color: {COLORS['accent_primary']};
                     color: #ffffff;
-                }
-                QPushButton:pressed {
-                    background-color: #00a8e8;
-                    color: #ffffff;
-                }
-                QPushButton:disabled {
-                    background-color: #141420;
-                    color: #404058;
-                    border-color: #1a1a28;
-                }
+                }}
+                QPushButton:disabled {{
+                    background: {COLORS['bg_base']};
+                    color: {COLORS['text_muted']};
+                    border-color: {COLORS['border_subtle']};
+                }}
             """)
 
 
 class StatusLog(QFrame):
     """
-    Styled status log area with header.
+    Terminal-style status log with refined monospace typography.
     """
 
     def __init__(self, parent=None):
@@ -316,46 +483,60 @@ class StatusLog(QFrame):
         self._setup_style()
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 12, 8, 8)
         layout.setSpacing(8)
 
-        # Header
-        header = QLabel("Status Log")
-        header.setStyleSheet("""
-            QLabel {
-                color: #707088;
-                font-size: 11px;
+        # Header with subtle styling
+        header = QLabel("◆ STATUS LOG")
+        header.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_muted']};
+                font-family: {FONTS['mono']};
+                font-size: 10px;
                 font-weight: 600;
-                text-transform: uppercase;
-                letter-spacing: 1px;
+                letter-spacing: 1.5px;
                 background: transparent;
-                padding-left: 4px;
-            }
+                padding-left: 2px;
+            }}
         """)
         layout.addWidget(header)
 
-        # Log area
+        # Log area with terminal aesthetic
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
-        self.log_area.setMinimumHeight(120)
-        self.log_area.setStyleSheet("""
-            QTextEdit {
-                background-color: #08080c;
-                color: #8080a0;
-                border: 1px solid #1a1a28;
+        self.log_area.setMinimumHeight(110)
+        self.log_area.setStyleSheet(f"""
+            QTextEdit {{
+                background: {COLORS['bg_void']};
+                color: {COLORS['text_muted']};
+                border: 1px solid {COLORS['border_subtle']};
                 border-radius: 8px;
-                padding: 10px;
-                font-family: 'JetBrains Mono', 'Consolas', monospace;
+                padding: 12px;
+                font-family: {FONTS['mono']};
                 font-size: 11px;
-            }
+                line-height: 1.5;
+            }}
+            QTextEdit QScrollBar:vertical {{
+                background: {COLORS['bg_deep']};
+                width: 8px;
+                border-radius: 4px;
+            }}
+            QTextEdit QScrollBar::handle:vertical {{
+                background: {COLORS['border_default']};
+                border-radius: 4px;
+                min-height: 30px;
+            }}
+            QTextEdit QScrollBar::handle:vertical:hover {{
+                background: {COLORS['text_muted']};
+            }}
         """)
         layout.addWidget(self.log_area)
 
     def _setup_style(self):
-        self.setStyleSheet("""
-            #statusLog {
+        self.setStyleSheet(f"""
+            #statusLog {{
                 background: transparent;
-            }
+            }}
         """)
 
     def append(self, text: str):
@@ -367,11 +548,11 @@ class StatusLog(QFrame):
 
 class CollapsibleBox(QFrame):
     """
-    Collapsible accordion section with triangle toggle icons.
-    Provides a compact, inspector-panel style collapsible container.
+    Collapsible accordion section with refined styling.
+    Features smooth toggle animation and distinctive header treatment.
     """
 
-    expanded = pyqtSignal(object)  # Emits self when expanded
+    expanded = pyqtSignal(object)
 
     def __init__(self, title: str, icon: str = "", expanded: bool = True, parent=None):
         super().__init__(parent)
@@ -385,13 +566,12 @@ class CollapsibleBox(QFrame):
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
 
-        # Header button with triangle icon
+        # Header button
         self.header = QPushButton()
         self.header.setObjectName("collapsibleHeader")
         self.header.setCursor(Qt.CursorShape.PointingHandCursor)
         self.header.clicked.connect(self._toggle)
         self._update_header_text()
-        self._style_header()
         self.main_layout.addWidget(self.header)
 
         # Content container
@@ -403,63 +583,47 @@ class CollapsibleBox(QFrame):
         self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.main_layout.addWidget(self.content)
 
-        # Set initial visibility
+        # Set initial state
         self.content.setVisible(self._expanded)
-        self._update_header_style()
+        self._apply_header_style()
 
     def _update_header_text(self):
-        """Update header text with appropriate triangle icon."""
-        triangle = "▼" if self._expanded else "▶"
+        """Update header text with chevron indicator."""
+        chevron = "▾" if self._expanded else "▸"
         icon_part = f" {self._icon}" if self._icon else ""
-        self.header.setText(f"  {triangle}{icon_part}  {self._title}")
+        self.header.setText(f"  {chevron}{icon_part}  {self._title}")
 
-    def _style_header(self):
-        """Apply base header styling."""
-        self.header.setStyleSheet("""
-            #collapsibleHeader {
-                background: #2d2d2d;
-                color: #ffffff;
+    def _apply_header_style(self):
+        """Apply header styling based on state."""
+        accent = COLORS['accent_glow'] if self._expanded else COLORS['text_secondary']
+        bg = COLORS['bg_surface'] if self._expanded else COLORS['bg_elevated']
+
+        self.header.setStyleSheet(f"""
+            #collapsibleHeader {{
+                background: {bg};
+                color: {accent};
                 border: none;
-                border-radius: 4px;
-                padding: 8px 12px;
+                border-radius: 6px;
+                padding: 10px 14px;
+                font-family: {FONTS['display']};
                 font-weight: 600;
                 font-size: 13px;
                 text-align: left;
-            }
-            #collapsibleHeader:hover {
-                background: #3a3a3a;
-            }
+            }}
+            #collapsibleHeader:hover {{
+                background: {COLORS['bg_hover']};
+                color: {COLORS['accent_glow']};
+            }}
         """)
-
-    def _update_header_style(self):
-        """Update header styling based on expanded state."""
-        if self._expanded:
-            self.header.setStyleSheet("""
-                #collapsibleHeader {
-                    background: #2d2d2d;
-                    color: #00d4ff;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 8px 12px;
-                    font-weight: 600;
-                    font-size: 13px;
-                    text-align: left;
-                }
-                #collapsibleHeader:hover {
-                    background: #3a3a3a;
-                }
-            """)
-        else:
-            self._style_header()
 
     def _toggle(self):
         """Toggle content visibility."""
         self._expanded = not self._expanded
         self.content.setVisible(self._expanded)
         self._update_header_text()
-        self._update_header_style()
+        self._apply_header_style()
         if self._expanded:
-            self.expanded.emit(self)  # Notify when opened
+            self.expanded.emit(self)
 
     def addWidget(self, widget):
         """Add a widget to the content area."""
@@ -481,36 +645,52 @@ class CollapsibleBox(QFrame):
 
 class SidebarTitle(QWidget):
     """
-    App title widget for sidebar header.
+    App branding header with distinctive typography.
+    Features the NeuroFlow brand with neural network motif.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 8, 4, 16)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 16, 12, 20)
+        layout.setSpacing(6)
 
-        # App name
+        # App name with custom styling
         title = QLabel("NeuroFlow")
-        title.setStyleSheet("""
-            QLabel {
-                font-size: 28px;
+        title.setStyleSheet(f"""
+            QLabel {{
+                font-family: {FONTS['display']};
+                font-size: 26px;
                 font-weight: 700;
-                color: #00d4ff;
+                color: {COLORS['accent_glow']};
                 background: transparent;
                 letter-spacing: -0.5px;
-            }
+            }}
         """)
         layout.addWidget(title)
 
-        # Tagline
+        # Tagline with refined typography
         tagline = QLabel("Professional EEG Analysis")
-        tagline.setStyleSheet("""
-            QLabel {
+        tagline.setStyleSheet(f"""
+            QLabel {{
+                font-family: {FONTS['body']};
                 font-size: 11px;
-                color: #606078;
+                font-weight: 400;
+                color: {COLORS['text_muted']};
                 background: transparent;
-                letter-spacing: 0.5px;
-            }
+                letter-spacing: 0.8px;
+            }}
         """)
         layout.addWidget(tagline)
+
+        # Subtle separator line
+        separator = QFrame()
+        separator.setFixedHeight(1)
+        separator.setStyleSheet(f"""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 transparent,
+                stop:0.2 {COLORS['border_subtle']},
+                stop:0.8 {COLORS['border_subtle']},
+                stop:1 transparent);
+        """)
+        layout.addWidget(separator)
