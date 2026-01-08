@@ -142,13 +142,17 @@ The application follows a separation of concerns pattern with multithreading:
 
 ## Screenshots
 
-<img width="1283" height="899" alt="Main Interface" src="https://github.com/user-attachments/assets/a3105fac-5ff1-48ef-af2f-b0a99ef44839" />
+<img width="1299" height="887" alt="image" src="https://github.com/user-attachments/assets/b68bb39c-87c1-4b69-92ab-b4d72b06a1d6" />
 
-<img width="1287" height="865" alt="ICA Analysis" src="https://github.com/user-attachments/assets/834bd9ad-9cc4-4a96-97ea-6108ba25eb33" />
+<img width="644" height="789" alt="image" src="https://github.com/user-attachments/assets/512036e6-6feb-4138-a579-f5cadd0cfdf2" />
 
-<img width="807" height="925" alt="ERP Viewer" src="https://github.com/user-attachments/assets/050dfc96-c021-49e2-8429-1fd5f4cfc146" />
+<img width="555" height="483" alt="image" src="https://github.com/user-attachments/assets/960faf1f-7cc6-4cd9-a9f7-1c081cb0cfa6" />
 
-<img width="1302" height="874" alt="Connectivity Explorer" src="https://github.com/user-attachments/assets/9c667a99-0c87-4ba4-b40a-36335a70e7f2" />
+<img width="1302" height="877" alt="image" src="https://github.com/user-attachments/assets/8b5bdb40-2609-4c35-917d-d94223242fa5" />
+
+<img width="1278" height="863" alt="image" src="https://github.com/user-attachments/assets/f7f64847-214c-4e64-97c1-1a5f7067d152" />
+
+<img width="1299" height="874" alt="image" src="https://github.com/user-attachments/assets/ad09c2a3-50e7-48a8-8c61-59c275dbbdc7" />
 
 ---
 
