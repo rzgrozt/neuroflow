@@ -12,10 +12,9 @@ Contains styled sidebar widgets with "Neural Elegance" theme:
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QLineEdit, QComboBox, QDoubleSpinBox, QTextEdit,
-    QScrollArea, QSizePolicy, QGraphicsDropShadowEffect
+    QScrollArea, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
 
 
 # =============================================================================
@@ -508,29 +507,3 @@ class SidebarTitle(QWidget):
             }
         """)
         layout.addWidget(tagline)
-
-
-def create_styled_sidebar():
-    """
-    Factory function to create the base styled sidebar frame.
-    Returns the frame, layout, and scroll area.
-    """
-    # Main sidebar frame
-    sidebar = QFrame()
-    sidebar.setObjectName("styledSidebar")
-    sidebar.setFixedWidth(300)
-    sidebar.setStyleSheet("""
-        #styledSidebar {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #0d0d14,
-                stop:1 #0a0a10);
-            border-right: 1px solid #1a1a28;
-            border-radius: 0px;
-        }
-    """)
-
-    main_layout = QVBoxLayout(sidebar)
-    main_layout.setContentsMargins(4, 8, 4, 8)
-    main_layout.setSpacing(8)
-
-    return sidebar, main_layout

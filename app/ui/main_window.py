@@ -11,9 +11,8 @@ import numpy as np
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QFileDialog, QFrame,
-    QMessageBox, QComboBox, QDoubleSpinBox,
-    QTabWidget, QToolBar, QApplication, QSplitter,
+    QFileDialog, QFrame, QMessageBox,
+    QTabWidget, QApplication, QSplitter,
     QScrollArea, QSizePolicy
 )
 from PyQt6.QtGui import QAction

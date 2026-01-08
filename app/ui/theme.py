@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import (
-    QFont, QColor, QPainter, QLinearGradient, QPen, QBrush, QMouseEvent
+    QColor, QPainter, QLinearGradient, QPen, QBrush, QMouseEvent
 )
 
 
