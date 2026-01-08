@@ -48,6 +48,10 @@ class MainWindow(QMainWindow):
         self.epochs = None  # Holds epochs for manual inspection
         self.epochs_inspected = False  # Flag to track if epochs have been inspected
 
+        # Pipeline history for traceability
+        self.pipeline_history = []
+        self.source_filename = None  # Base filename without extension
+
         self.thread = QThread()
         self.worker = EEGWorker()
         self.worker.moveToThread(self.thread)
@@ -144,7 +148,32 @@ class MainWindow(QMainWindow):
             self.log_status(f"Screenshot saved to {filename}")
 
     def on_save_finished(self, filename):
-        QMessageBox.information(self, "Save Successful", f"Data saved to:\n{filename}")
+        # Save pipeline history JSON alongside the data file
+        import json
+        from pathlib import Path
+        
+        history_saved = False
+        history_path = None
+        
+        if self.source_filename and self.pipeline_history:
+            history_filename = f"{self.source_filename}_history.json"
+            history_path = Path(filename).parent / history_filename
+            
+            try:
+                with open(history_path, 'w') as f:
+                    json.dump(self.pipeline_history, f, indent=4)
+                history_saved = True
+            except Exception as e:
+                self.log_status(f"Warning: Could not save history file: {e}")
+        
+        if history_saved:
+            QMessageBox.information(
+                self, 
+                "Save Successful", 
+                f"Data saved to:\n{filename}\n\nProcessing history saved to:\n{history_path}"
+            )
+        else:
+            QMessageBox.information(self, "Save Successful", f"Data saved to:\n{filename}")
 
     def init_ui(self):
         central_widget = QWidget()
@@ -427,6 +456,25 @@ class MainWindow(QMainWindow):
         self.btn_calc_ica.setEnabled(True)  # Enable ICA
         self.btn_apply_ica.setEnabled(True)
 
+        # Reset pipeline history for new dataset
+        self.pipeline_history = []
+        
+        # Extract and store source filename
+        if self.worker.raw is not None and hasattr(self.worker.raw, 'filenames'):
+            from pathlib import Path
+            source_path = self.worker.raw.filenames[0]
+            self.source_filename = Path(source_path).stem
+        else:
+            self.source_filename = "unknown"
+        
+        # Log data loaded event
+        from datetime import datetime
+        self.pipeline_history.append({
+            "timestamp": datetime.now().isoformat(timespec='seconds'),
+            "action": "data_loaded",
+            "params": {"filename": self.source_filename}
+        })
+
         # Populate Channels for TFR
         self.combo_channels.clear()
         self.combo_channels.addItems(self.raw_data.ch_names)
@@ -452,7 +500,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        dialog = DatasetInfoDialog(self.raw_data, parent=self)
+        dialog = DatasetInfoDialog(self.raw_data, parent=self, pipeline_history=self.pipeline_history)
         dialog.exec()
 
     def launch_pipeline(self):
@@ -470,6 +518,13 @@ class MainWindow(QMainWindow):
             l_freq = hp
             h_freq = lp
 
+            # Store pending filter params for history logging
+            self._pending_filter_params = {
+                "highpass": hp if hp > 0 else None,
+                "lowpass": lp if lp > 0 else None,
+                "notch": notch if notch > 0 else None
+            }
+
             self.request_run_pipeline.emit(l_freq, h_freq, notch)
 
         except ValueError:
@@ -480,6 +535,15 @@ class MainWindow(QMainWindow):
 
     def apply_ica_click(self):
         excludes = self.input_ica_exclude.text()
+        
+        # Store pending ICA params for history logging
+        if not excludes.strip():
+            self._pending_ica_excludes = []
+        else:
+            self._pending_ica_excludes = [
+                int(x.strip()) for x in excludes.split(',') if x.strip().isdigit()
+            ]
+        
         self.request_apply_ica.emit(excludes)
 
     def populate_event_dropdown(self, event_id_dict):
@@ -579,6 +643,20 @@ class MainWindow(QMainWindow):
                 f"Manual inspection complete. Removed {n_rejected} epochs. "
                 f"Remaining: {n_epochs_after}."
             )
+
+            # Log manual epoch rejection to pipeline history
+            from datetime import datetime
+            self.pipeline_history.append({
+                "timestamp": datetime.now().isoformat(timespec='seconds'),
+                "action": "manual_epoch_rejection",
+                "params": {
+                    "event": event_name,
+                    "tmin": tmin,
+                    "tmax": tmax,
+                    "kept": n_epochs_after,
+                    "rejected": n_rejected
+                }
+            })
 
             if n_epochs_after == 0:
                 self.show_error("All epochs were rejected! Cannot compute ERP.")
@@ -743,6 +821,26 @@ class MainWindow(QMainWindow):
     def update_plot(self, freqs, psd_mean, filter_info_str):
         """Updates the Matplotlib canvas with the new PSD data."""
         self.canvas.axes.clear()
+
+        # Log filter operation if pending (from launch_pipeline, not ICA)
+        if hasattr(self, '_pending_filter_params') and self._pending_filter_params is not None:
+            from datetime import datetime
+            self.pipeline_history.append({
+                "timestamp": datetime.now().isoformat(timespec='seconds'),
+                "action": "filter",
+                "params": self._pending_filter_params
+            })
+            self._pending_filter_params = None  # Clear pending
+
+        # Log ICA exclusion if pending (from apply_ica_click)
+        if hasattr(self, '_pending_ica_excludes') and self._pending_ica_excludes is not None:
+            from datetime import datetime
+            self.pipeline_history.append({
+                "timestamp": datetime.now().isoformat(timespec='seconds'),
+                "action": "ica_exclusion",
+                "params": {"excluded_components": self._pending_ica_excludes}
+            })
+            self._pending_ica_excludes = None  # Clear pending
 
         # PSD Plot Logic
         # 10*np.log10 to convert to dB

@@ -17,8 +17,9 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from PyQt6.QtWidgets import (
     QDialog, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QSlider, QSplitter, QTabWidget,
-    QTableWidget, QTableWidgetItem, QHeaderView
+    QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit, QApplication
 )
+from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt, QTimer
 
 from .canvas import MplCanvas
@@ -60,11 +61,12 @@ class DatasetInfoDialog(QDialog):
     Includes General Info and Event Statistics tabs for quality control.
     """
 
-    def __init__(self, raw: mne.io.BaseRaw, parent=None):
+    def __init__(self, raw: mne.io.BaseRaw, parent=None, pipeline_history: list = None):
         super().__init__(parent)
         self.setWindowTitle("Dataset Inspector")
-        self.resize(550, 450)
+        self.resize(550, 500)
         self.raw = raw
+        self.pipeline_history = pipeline_history or []
 
         self._init_ui()
 
@@ -104,6 +106,28 @@ class DatasetInfoDialog(QDialog):
         events_layout.addWidget(self.event_table)
 
         tabs.addTab(tab_events, "Event Statistics")
+
+        # --- Tab 3: Processing History ---
+        tab_history = QWidget()
+        history_layout = QVBoxLayout(tab_history)
+        history_layout.setContentsMargins(10, 10, 10, 10)
+
+        import json
+        history_text = QTextEdit()
+        history_text.setReadOnly(True)
+        history_text.setFont(QFont("Consolas", 9))
+        if self.pipeline_history:
+            history_text.setPlainText(json.dumps(self.pipeline_history, indent=2))
+        else:
+            history_text.setPlainText("No processing steps recorded yet.")
+        history_layout.addWidget(history_text)
+
+        # Copy to clipboard button
+        btn_copy = QPushButton("Copy to Clipboard")
+        btn_copy.clicked.connect(lambda: QApplication.clipboard().setText(history_text.toPlainText()))
+        history_layout.addWidget(btn_copy)
+
+        tabs.addTab(tab_history, "Processing History")
 
         layout.addWidget(tabs)
 
