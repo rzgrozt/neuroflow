@@ -27,6 +27,7 @@
 | **High-Pass Filter** | Remove slow drifts and DC offsets |
 | **Low-Pass Filter** | Eliminate high-frequency noise |
 | **Notch Filter** | Suppress power line noise (50/60 Hz) |
+| **Channel Interpolation** | Repair bad channels using spherical spline interpolation |
 | **ICA Decomposition** | FastICA-based artifact identification and removal (EOG, ECG) |
 
 ### Analysis Tools
