@@ -10,10 +10,11 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from PyQt6.QtWidgets import (
     QDialog, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QSlider, QSplitter, QTabWidget,
-    QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit, QApplication
+    QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit, QApplication,
+    QListWidget, QListWidgetItem, QFrame
 )
 from PyQt6.QtGui import QFont
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
 from .canvas import MplCanvas
 
@@ -146,8 +147,6 @@ class DatasetInfoDialog(QDialog):
         else:
             history_text.setPlainText("No processing steps recorded yet.")
         history_layout.addWidget(history_text)
-
-        history_layout.addWidget(btn_copy)
 
         tabs.addTab(tab_history, "Processing History")
 
@@ -394,3 +393,227 @@ class ERPViewer(QMainWindow):
             self.topomap_canvas.draw()
         except Exception as e:
             print(f"Topomap Error: {e}")
+
+
+
+class ChannelManagerDialog(QDialog):
+    """Dialog for managing and interpolating bad EEG channels."""
+    
+    interpolate_requested = pyqtSignal(list)  # Emits list of channels to interpolate
+
+    def __init__(self, raw: mne.io.BaseRaw, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Channel Manager")
+        self.resize(450, 550)
+        self.raw = raw
+        self.setModal(True)
+        
+        self._init_ui()
+        self._populate_channels()
+
+    def _init_ui(self):
+        """Initialize the dialog UI."""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Header
+        header = QWidget()
+        header.setStyleSheet("background-color: #151520; border-bottom: 1px solid #252538;")
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(20, 16, 20, 16)
+        
+        title = QLabel("Channel Manager")
+        title.setStyleSheet("color: #e0e0f0; font-size: 16px; font-weight: 600;")
+        header_layout.addWidget(title)
+        
+        subtitle = QLabel("Select channels to mark as bad and interpolate using spherical spline interpolation.")
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet("color: #8080a0; font-size: 12px;")
+        header_layout.addWidget(subtitle)
+        
+        layout.addWidget(header)
+
+        # Channel List Container
+        list_container = QWidget()
+        list_container.setStyleSheet("background-color: #0a0a10;")
+        list_layout = QVBoxLayout(list_container)
+        list_layout.setContentsMargins(16, 16, 16, 16)
+        list_layout.setSpacing(12)
+
+        # Info label
+        info_label = QLabel("Channels:")
+        info_label.setStyleSheet("color: #9090a8; font-size: 13px; font-weight: 600;")
+        list_layout.addWidget(info_label)
+
+        # Channel list widget
+        self.channel_list = QListWidget()
+        self.channel_list.setStyleSheet("""
+            QListWidget {
+                background-color: #12121c;
+                border: 1px solid #252538;
+                border-radius: 8px;
+                padding: 8px;
+                color: #e0e0f0;
+                font-size: 13px;
+            }
+            QListWidget::item {
+                padding: 6px 8px;
+                border-radius: 4px;
+            }
+            QListWidget::item:hover {
+                background-color: #1a1a28;
+            }
+            QListWidget::item:selected {
+                background-color: #252540;
+            }
+        """)
+        self.channel_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        list_layout.addWidget(self.channel_list)
+
+        # Selection info
+        self.selection_label = QLabel("0 channel(s) selected")
+        self.selection_label.setStyleSheet("color: #6080a0; font-size: 12px;")
+        list_layout.addWidget(self.selection_label)
+        
+        # Connect selection change
+        self.channel_list.itemSelectionChanged.connect(self._on_selection_changed)
+
+        layout.addWidget(list_container, 1)
+
+        # Button Bar
+        button_bar = QWidget()
+        button_bar.setStyleSheet("background-color: #151520; border-top: 1px solid #252538;")
+        button_layout = QHBoxLayout(button_bar)
+        button_layout.setContentsMargins(16, 12, 16, 12)
+        button_layout.setSpacing(12)
+
+        # Select All / Deselect All buttons
+        self.btn_select_all = QPushButton("Select All")
+        self.btn_select_all.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_select_all.setStyleSheet(self._get_secondary_button_style())
+        self.btn_select_all.clicked.connect(self._select_all)
+        button_layout.addWidget(self.btn_select_all)
+
+        self.btn_deselect_all = QPushButton("Deselect All")
+        self.btn_deselect_all.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_deselect_all.setStyleSheet(self._get_secondary_button_style())
+        self.btn_deselect_all.clicked.connect(self._deselect_all)
+        button_layout.addWidget(self.btn_deselect_all)
+
+        button_layout.addStretch()
+
+        # Cancel button
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel.setFixedWidth(90)
+        self.btn_cancel.setStyleSheet(self._get_secondary_button_style())
+        self.btn_cancel.clicked.connect(self.reject)
+        button_layout.addWidget(self.btn_cancel)
+
+        # Interpolate button
+        self.btn_interpolate = QPushButton("Interpolate")
+        self.btn_interpolate.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_interpolate.setFixedWidth(120)
+        self.btn_interpolate.setStyleSheet(self._get_primary_button_style())
+        self.btn_interpolate.clicked.connect(self._on_interpolate_clicked)
+        self.btn_interpolate.setEnabled(False)
+        button_layout.addWidget(self.btn_interpolate)
+
+        layout.addWidget(button_bar)
+
+    def _populate_channels(self):
+        """Populate the channel list with all channels from the raw object."""
+        if self.raw is None:
+            return
+
+        current_bads = self.raw.info.get('bads', [])
+        
+        for ch_name in self.raw.ch_names:
+            item = QListWidgetItem(ch_name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            
+            # Mark already known bad channels as selected
+            if ch_name in current_bads:
+                item.setSelected(True)
+                item.setText(f"{ch_name} (marked bad)")
+            
+            self.channel_list.addItem(item)
+
+    def _on_selection_changed(self):
+        """Update selection label and button state when selection changes."""
+        selected_count = len(self.channel_list.selectedItems())
+        self.selection_label.setText(f"{selected_count} channel(s) selected")
+        self.btn_interpolate.setEnabled(selected_count > 0)
+
+    def _select_all(self):
+        """Select all channels in the list."""
+        self.channel_list.selectAll()
+
+    def _deselect_all(self):
+        """Deselect all channels in the list."""
+        self.channel_list.clearSelection()
+
+    def _on_interpolate_clicked(self):
+        """Emit signal with selected channels and close dialog."""
+        selected_channels = []
+        for item in self.channel_list.selectedItems():
+            # Extract channel name (remove " (marked bad)" suffix if present)
+            ch_name = item.text().replace(" (marked bad)", "")
+            selected_channels.append(ch_name)
+        
+        if selected_channels:
+            self.interpolate_requested.emit(selected_channels)
+            self.accept()
+
+    def get_selected_channels(self) -> list:
+        """Return list of selected channel names."""
+        selected_channels = []
+        for item in self.channel_list.selectedItems():
+            ch_name = item.text().replace(" (marked bad)", "")
+            selected_channels.append(ch_name)
+        return selected_channels
+
+    def _get_primary_button_style(self) -> str:
+        """Return stylesheet for primary action buttons."""
+        return """
+            QPushButton {
+                background-color: #0080b8;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #0090cc;
+            }
+            QPushButton:pressed {
+                background-color: #0070a0;
+            }
+            QPushButton:disabled {
+                background-color: #404060;
+                color: #808090;
+            }
+        """
+
+    def _get_secondary_button_style(self) -> str:
+        """Return stylesheet for secondary action buttons."""
+        return """
+            QPushButton {
+                background-color: #252538;
+                color: #c0c0d0;
+                border: 1px solid #353550;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #303048;
+                border-color: #454560;
+            }
+            QPushButton:pressed {
+                background-color: #202030;
+            }
+        """

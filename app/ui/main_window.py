@@ -11,12 +11,12 @@ from PyQt6.QtWidgets import (
     QTabWidget, QApplication, QSplitter,
     QScrollArea, QSizePolicy
 )
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
 
 from app.core.workers import EEGWorker
 from .canvas import MplCanvas
-from .dialogs import DatasetInfoDialog, ConnectivityDialog, ERPViewer
+from .dialogs import DatasetInfoDialog, ConnectivityDialog, ERPViewer, ChannelManagerDialog
 from .theme import ModernAboutDialog
 
 
@@ -31,10 +31,12 @@ class MainWindow(QMainWindow):
     request_compute_tfr = pyqtSignal(str, float, float)
     request_compute_connectivity = pyqtSignal()
     request_save_data = pyqtSignal(str)
+    request_interpolate_bads = pyqtSignal(list)
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("NeuroFlow - Professional EEG Analysis")
+        self.setWindowIcon(QIcon("assets/neuroflow_icon.png"))
         self.resize(1300, 850)
         self.raw_data = None
         self.epochs = None  # Holds epochs for manual inspection
@@ -58,6 +60,7 @@ class MainWindow(QMainWindow):
         self.worker.tfr_ready.connect(self.plot_tfr)
         self.worker.connectivity_ready.connect(self.plot_connectivity)
         self.worker.save_finished.connect(self.on_save_finished)
+        self.worker.interpolation_done.connect(self.on_interpolation_done)
 
         self.request_load_data.connect(self.worker.load_data)
         self.request_run_pipeline.connect(self.worker.run_pipeline)
@@ -67,6 +70,7 @@ class MainWindow(QMainWindow):
         self.request_compute_tfr.connect(self.worker.compute_tfr)
         self.request_compute_connectivity.connect(self.worker.compute_connectivity)
         self.request_save_data.connect(self.worker.save_data)
+        self.request_interpolate_bads.connect(self.worker.interpolate_bads)
 
         self.thread.start()
 
@@ -253,6 +257,16 @@ class MainWindow(QMainWindow):
         card_pipeline.addWidget(self.btn_run)
         section_data.addWidget(card_pipeline)
 
+        # Channel Manager Card
+        card_channels = SectionCard("Channel Manager", "🔧")
+
+        self.btn_channel_manager = ActionButton("Manage & Repair Channels")
+        self.btn_channel_manager.clicked.connect(self.open_channel_manager)
+        self.btn_channel_manager.setEnabled(False)
+        self.btn_channel_manager.setToolTip("Mark bad channels and interpolate using spherical spline")
+        card_channels.addWidget(self.btn_channel_manager)
+        section_data.addWidget(card_channels)
+
         scroll_layout.addWidget(section_data)
 
         # Artifact Removal Section
@@ -430,6 +444,7 @@ class MainWindow(QMainWindow):
         self.btn_dataset_info.setEnabled(True)
         self.btn_calc_ica.setEnabled(True)  # Enable ICA
         self.btn_apply_ica.setEnabled(True)
+        self.btn_channel_manager.setEnabled(True)  # Enable Channel Manager
 
         # Reset pipeline history for new dataset
         self.pipeline_history = []
@@ -834,6 +849,39 @@ class MainWindow(QMainWindow):
         self.canvas.axes.set_facecolor('#1e1e1e')
 
         self.canvas.draw()
+
+    def open_channel_manager(self):
+        """Open the Channel Manager dialog for bad channel interpolation."""
+        if self.raw_data is None:
+            self.show_error("No data loaded. Please load a dataset first.")
+            return
+
+        dialog = ChannelManagerDialog(self.raw_data, parent=self)
+        dialog.interpolate_requested.connect(self._on_interpolate_channels)
+        dialog.exec()
+
+    def _on_interpolate_channels(self, channels: list):
+        """Handle interpolation request from Channel Manager dialog."""
+        if not channels:
+            return
+        
+        self.log_status(f"Starting interpolation for channels: {', '.join(channels)}")
+        self.request_interpolate_bads.emit(channels)
+
+    def on_interpolation_done(self, channels: list):
+        """Handle successful channel interpolation."""
+        channel_str = ", ".join(channels)
+        self.log_status(f"Successfully interpolated channels: {channel_str}")
+        
+        # Update raw_data reference
+        self.raw_data = self.worker.raw
+        
+        # Add to pipeline history
+        self.pipeline_history.append({
+            "step": "channel_interpolation",
+            "channels": channels,
+            "method": "spherical_spline"
+        })
 
     def closeEvent(self, event):
         """Clean up thread on close."""

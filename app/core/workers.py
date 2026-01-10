@@ -32,6 +32,7 @@ class EEGWorker(QObject):
     tfr_ready = pyqtSignal(object)  # Emits TFR object (AverageTFR)
     connectivity_ready = pyqtSignal(object)  # Emits connectivity object (figure or data)
     save_finished = pyqtSignal(str)  # Emits filename when save is complete
+    interpolation_done = pyqtSignal(list)  # Emits list of interpolated channels
 
     def __init__(self):
         super().__init__()
@@ -368,4 +369,58 @@ class EEGWorker(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"Connectivity Error: {str(e)}")
+            traceback.print_exc()
+
+
+    @pyqtSlot(list)
+    def interpolate_bads(self, bad_channels: list):
+        """Interpolate bad channels using spherical spline interpolation.
+        
+        Args:
+            bad_channels: List of channel names to mark as bad and interpolate.
+        """
+        if self.raw is None:
+            self.error_occurred.emit("No data loaded. Cannot interpolate channels.")
+            return
+
+        if not bad_channels:
+            self.log_message.emit("No channels selected for interpolation.")
+            self.finished.emit()
+            return
+
+        self.log_message.emit(f"Interpolating bad channels: {', '.join(bad_channels)}")
+
+        try:
+            # Check if montage is set (required for interpolation)
+            if self.raw.get_montage() is None:
+                self.error_occurred.emit(
+                    "Montage not set. Interpolation requires sensor positions. "
+                    "Please load data with a montage or set one manually."
+                )
+                return
+
+            # Validate that all specified channels exist
+            invalid_channels = [ch for ch in bad_channels if ch not in self.raw.ch_names]
+            if invalid_channels:
+                self.error_occurred.emit(
+                    f"Invalid channels: {', '.join(invalid_channels)}. "
+                    "These channels do not exist in the dataset."
+                )
+                return
+
+            # Mark channels as bad
+            self.raw.info['bads'] = bad_channels
+            self.log_message.emit(f"Marked {len(bad_channels)} channel(s) as bad.")
+
+            # Perform interpolation
+            self.raw.interpolate_bads(reset_bads=True, verbose=True)
+
+            self.log_message.emit(
+                f"Successfully interpolated channels: {', '.join(bad_channels)}"
+            )
+            self.interpolation_done.emit(bad_channels)
+            self.finished.emit()
+
+        except Exception as e:
+            self.error_occurred.emit(f"Interpolation Error: {str(e)}")
             traceback.print_exc()
