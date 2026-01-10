@@ -32,6 +32,7 @@ class MainWindow(QMainWindow):
     request_compute_connectivity = pyqtSignal()
     request_save_data = pyqtSignal(str)
     request_interpolate_bads = pyqtSignal(list)
+    request_generate_report = pyqtSignal(object, object, object, object, list)
 
     def __init__(self):
         super().__init__()
@@ -61,6 +62,7 @@ class MainWindow(QMainWindow):
         self.worker.connectivity_ready.connect(self.plot_connectivity)
         self.worker.save_finished.connect(self.on_save_finished)
         self.worker.interpolation_done.connect(self.on_interpolation_done)
+        self.worker.report_ready.connect(self.on_report_ready)
 
         self.request_load_data.connect(self.worker.load_data)
         self.request_run_pipeline.connect(self.worker.run_pipeline)
@@ -71,6 +73,7 @@ class MainWindow(QMainWindow):
         self.request_compute_connectivity.connect(self.worker.compute_connectivity)
         self.request_save_data.connect(self.worker.save_data)
         self.request_interpolate_bads.connect(self.worker.interpolate_bads)
+        self.request_generate_report.connect(self.worker.generate_report)
 
         self.thread.start()
 
@@ -94,6 +97,12 @@ class MainWindow(QMainWindow):
         screenshot_action.setStatusTip("Take a screenshot of the application")
         screenshot_action.triggered.connect(self.on_take_screenshot)
         file_menu.addAction(screenshot_action)
+
+        report_action = QAction("&Generate Analysis Report", self)
+        report_action.setShortcut("Ctrl+R")
+        report_action.setStatusTip("Generate an HTML report of the analysis pipeline")
+        report_action.triggered.connect(self.run_report_generation)
+        file_menu.addAction(report_action)
 
         file_menu.addSeparator()
 
@@ -877,11 +886,59 @@ class MainWindow(QMainWindow):
         self.raw_data = self.worker.raw
         
         # Add to pipeline history
+        from datetime import datetime
         self.pipeline_history.append({
-            "step": "channel_interpolation",
-            "channels": channels,
-            "method": "spherical_spline"
+            "timestamp": datetime.now().isoformat(timespec='seconds'),
+            "action": "channel_interpolation",
+            "params": {
+                "channels": channels,
+                "method": "spherical_spline"
+            }
         })
+
+
+    def run_report_generation(self):
+        """Trigger report generation on the worker thread."""
+        if self.raw_data is None:
+            QMessageBox.warning(
+                self,
+                "No Data Loaded",
+                "Please load a dataset before generating a report."
+            )
+            return
+
+        self.log_status("Starting report generation...")
+
+        # Gather evoked data if available
+        evoked = getattr(self, 'evoked', None)
+
+        # Emit signal to worker thread
+        self.request_generate_report.emit(
+            self.raw_data,
+            self.worker.ica,
+            self.epochs,
+            evoked,
+            self.pipeline_history
+        )
+
+    def on_report_ready(self, report_path: str):
+        """Handle successful report generation."""
+        import webbrowser
+        import os
+
+        abs_path = os.path.abspath(report_path)
+        self.log_status(f"Report generated: {abs_path}")
+
+        reply = QMessageBox.question(
+            self,
+            "Report Generated",
+            f"Report generated successfully at:\n{abs_path}\n\nOpen in browser now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            webbrowser.open(f"file://{abs_path}")
 
     def closeEvent(self, event):
         """Clean up thread on close."""

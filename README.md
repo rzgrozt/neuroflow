@@ -47,6 +47,7 @@
 | **Event Statistics** | Tabular view of event counts for data integrity verification |
 | **Screenshot Export** | Capture analysis views for reports and documentation |
 | **Pipeline History** | Automatic logging of all preprocessing steps with timestamps for reproducibility |
+| **HTML Report Generation** | Export complete analysis pipeline to a professional HTML report using MNE Report |
 
 ---
 

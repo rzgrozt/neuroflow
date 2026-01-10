@@ -33,6 +33,7 @@ class EEGWorker(QObject):
     connectivity_ready = pyqtSignal(object)  # Emits connectivity object (figure or data)
     save_finished = pyqtSignal(str)  # Emits filename when save is complete
     interpolation_done = pyqtSignal(list)  # Emits list of interpolated channels
+    report_ready = pyqtSignal(str)  # Emits file path of generated report
 
     def __init__(self):
         super().__init__()
@@ -424,3 +425,127 @@ class EEGWorker(QObject):
         except Exception as e:
             self.error_occurred.emit(f"Interpolation Error: {str(e)}")
             traceback.print_exc()
+
+
+    @pyqtSlot(object, object, object, object, list)
+    def generate_report(
+        self,
+        raw: object,
+        ica: object,
+        epochs: object,
+        evoked: object,
+        history_log: list,
+    ):
+        """Generate an HTML analysis report using mne.Report.
+
+        Args:
+            raw: The MNE Raw object (cleaned/processed).
+            ica: The fitted ICA object (or None).
+            epochs: The Epochs object (or None).
+            evoked: The Evoked object (or None).
+            history_log: List of dicts containing pipeline history.
+        """
+        if raw is None:
+            self.error_occurred.emit("No data loaded. Cannot generate report.")
+            return
+
+        self.log_message.emit("Generating analysis report...")
+
+        try:
+            report = mne.Report(title="NeuroFlow Analysis Report")
+
+            # Add Raw data with PSD
+            self.log_message.emit("Adding raw data to report...")
+            report.add_raw(raw, title="Raw Data (Cleaned)", psd=True)
+
+            # Add ICA if available
+            if ica is not None:
+                self.log_message.emit("Adding ICA components to report...")
+                report.add_ica(ica, title="ICA Artifact Removal", inst=raw)
+
+            # Add Epochs if available
+            if epochs is not None:
+                self.log_message.emit("Adding epochs to report...")
+                report.add_epochs(epochs, title="Epochs Check")
+
+            # Add Evoked/ERP if available
+            if evoked is not None:
+                self.log_message.emit("Adding ERP to report...")
+                report.add_evokeds(evoked, titles=["ERP Response"])
+
+            # Add Pipeline History as HTML
+            if history_log:
+                self.log_message.emit("Adding pipeline history to report...")
+                history_html = self._format_history_html(history_log)
+                report.add_html(history_html, title="Pipeline History")
+
+            # Save the report
+            report_path = "neuroflow_report.html"
+            self.log_message.emit(f"Saving report to {report_path}...")
+            report.save(report_path, overwrite=True, open_browser=False)
+
+            self.log_message.emit(f"Report generated successfully: {report_path}")
+            self.report_ready.emit(report_path)
+            self.finished.emit()
+
+        except Exception as e:
+            self.error_occurred.emit(f"Report Generation Error: {str(e)}")
+            traceback.print_exc()
+
+    def _format_history_html(self, history_log: list) -> str:
+        """Convert pipeline history to formatted HTML.
+
+        Args:
+            history_log: List of dicts with pipeline step information.
+
+        Returns:
+            Formatted HTML string.
+        """
+        html_parts = [
+            "<div style='font-family: Arial, sans-serif; padding: 20px;'>",
+            "<h2 style='color: #2c3e50;'>Analysis Pipeline History</h2>",
+            "<table style='width: 100%; border-collapse: collapse; margin-top: 10px;'>",
+            "<thead>",
+            "<tr style='background-color: #3498db; color: white;'>",
+            "<th style='padding: 12px; text-align: left; border: 1px solid #ddd;'>Step</th>",
+            "<th style='padding: 12px; text-align: left; border: 1px solid #ddd;'>Operation</th>",
+            "<th style='padding: 12px; text-align: left; border: 1px solid #ddd;'>Parameters</th>",
+            "<th style='padding: 12px; text-align: left; border: 1px solid #ddd;'>Timestamp</th>",
+            "</tr>",
+            "</thead>",
+            "<tbody>",
+        ]
+
+        for idx, step in enumerate(history_log, 1):
+            # Support both 'action' and 'operation' keys for backwards compatibility
+            operation = step.get("action") or step.get("operation", "Unknown")
+            # Support both 'params' and 'parameters' keys
+            params = step.get("params") or step.get("parameters", {})
+            timestamp = step.get("timestamp", "N/A")
+
+            # Format parameters as readable string
+            if isinstance(params, dict):
+                params_str = ", ".join(f"{k}: {v}" for k, v in params.items()) if params else "N/A"
+            else:
+                params_str = str(params)
+
+            row_color = "#f9f9f9" if idx % 2 == 0 else "#ffffff"
+            html_parts.append(
+                f"<tr style='background-color: {row_color};'>"
+                f"<td style='padding: 10px; border: 1px solid #ddd;'>{idx}</td>"
+                f"<td style='padding: 10px; border: 1px solid #ddd;'>{operation}</td>"
+                f"<td style='padding: 10px; border: 1px solid #ddd;'>{params_str}</td>"
+                f"<td style='padding: 10px; border: 1px solid #ddd;'>{timestamp}</td>"
+                f"</tr>"
+            )
+
+        html_parts.extend([
+            "</tbody>",
+            "</table>",
+            "<p style='margin-top: 20px; color: #7f8c8d; font-size: 12px;'>",
+            "Generated by NeuroFlow - Professional EEG Analysis",
+            "</p>",
+            "</div>",
+        ])
+
+        return "\n".join(html_parts)
