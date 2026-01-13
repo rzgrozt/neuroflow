@@ -30,6 +30,15 @@
 | **Channel Interpolation** | Repair bad channels using spherical spline interpolation |
 | **ICA Decomposition** | FastICA-based artifact identification and removal (EOG, ECG) |
 
+### Visualization
+
+| Feature | Description |
+|---------|-------------|
+| **Clinical Time-Series View** | Stacked channel display with adjustable scale and duration |
+| **Time Navigation** | Slider-based scrolling through recordings with real-time updates |
+| **Original Data Overlay** | Compare processed vs. original data with transparency overlay |
+| **Cumulative Pipeline** | Destructive editing on working copy preserves original for comparison |
+
 ### Analysis Tools
 
 | Feature | Description |

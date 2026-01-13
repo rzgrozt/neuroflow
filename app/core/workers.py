@@ -34,10 +34,12 @@ class EEGWorker(QObject):
     save_finished = pyqtSignal(str)  # Emits filename when save is complete
     interpolation_done = pyqtSignal(list)  # Emits list of interpolated channels
     report_ready = pyqtSignal(str)  # Emits file path of generated report
+    data_updated = pyqtSignal(object, str)  # Emits (raw, info_str) after any pipeline operation
 
     def __init__(self):
         super().__init__()
-        self.raw = None  # Holds the MNE Raw object
+        self.raw = None  # Holds the MNE Raw object (working copy)
+        self.raw_original = None  # Holds the original unmodified Raw object for comparison
         self.ica = None  # Holds the fitted ICA object
         self.events = None
         self.event_id = None
@@ -84,6 +86,10 @@ class EEGWorker(QObject):
             else:
                 self.log_message.emit("Dataset already contains montage information.")
 
+            # Store a copy of the original data for comparison
+            self.raw_original = self.raw.copy()
+            self.log_message.emit("Original data backup created for comparison.")
+
             self.data_loaded.emit(self.raw)
 
             try:
@@ -110,14 +116,12 @@ class EEGWorker(QObject):
 
     @pyqtSlot(float, float, float)
     def run_pipeline(self, l_freq: float, h_freq: float, notch_freq: float):
-        """Run preprocessing pipeline: Filtering -> PSD Calculation."""
+        """Run preprocessing pipeline: Filtering on working copy (cumulative)."""
         if self.raw is None:
             self.error_occurred.emit("No data loaded. Please load a dataset first.")
             return
 
         self.log_message.emit("Starting preprocessing pipeline...")
-
-        result_raw = self.raw.copy()
 
         try:
             filter_info = []
@@ -127,12 +131,12 @@ class EEGWorker(QObject):
                 hf = h_freq if h_freq > 0 else None
 
                 self.log_message.emit(f"Applying Bandpass Filter: HP={lf} Hz, LP={hf} Hz")
-                result_raw.filter(l_freq=lf, h_freq=hf, fir_design='firwin', verbose=False)
+                self.raw.filter(l_freq=lf, h_freq=hf, fir_design='firwin', verbose=False)
                 filter_info.append(f"Bandpass: {lf}-{hf} Hz")
 
             if notch_freq > 0:
                 self.log_message.emit(f"Applying Notch Filter at {notch_freq} Hz")
-                result_raw.notch_filter(
+                self.raw.notch_filter(
                     freqs=np.array([notch_freq]), fir_design='firwin', verbose=False
                 )
                 filter_info.append(f"Notch: {notch_freq} Hz")
@@ -140,16 +144,11 @@ class EEGWorker(QObject):
             if not filter_info:
                 filter_info.append("Raw Signal")
 
-            self.log_message.emit("Computing Power Spectral Density (PSD)...")
-
-            spectrum = result_raw.compute_psd(fmax=100)
-            psds, freqs = spectrum.get_data(return_freqs=True)
-
-            psd_mean = psds.mean(axis=0)
-
             filter_str = " | ".join(filter_info)
-            self.psd_ready.emit(freqs, psd_mean, filter_str)
-            self.log_message.emit("Pipeline completed successfully.")
+            self.log_message.emit(f"Pipeline completed: {filter_str}")
+            
+            # Emit data_updated signal with current processed data
+            self.data_updated.emit(self.raw, filter_str)
             self.finished.emit()
 
         except Exception as e:
@@ -185,7 +184,7 @@ class EEGWorker(QObject):
 
     @pyqtSlot(str)
     def apply_ica(self, exclude_str: str):
-        """Apply ICA with excluded components and re-compute PSD."""
+        """Apply ICA with excluded components to the working copy (cumulative)."""
         if self.ica is None:
             self.error_occurred.emit("ICA has not been calculated yet.")
             return
@@ -201,15 +200,13 @@ class EEGWorker(QObject):
             self.log_message.emit(f"Applying ICA exclusion: {excludes}")
             self.ica.exclude = excludes
 
-            clean_raw = self.raw.copy()
-            self.ica.apply(clean_raw)
+            # Apply ICA directly to self.raw (cumulative, destructive on working copy)
+            self.ica.apply(self.raw)
 
-            self.log_message.emit("Computing PSD on ICA-cleaned data...")
-            spectrum = clean_raw.compute_psd(fmax=100)
-            psds, freqs = spectrum.get_data(return_freqs=True)
-            psd_mean = psds.mean(axis=0)
-
-            self.psd_ready.emit(freqs, psd_mean, f"ICA Cleaned | Excl: {excludes}")
+            self.log_message.emit("ICA applied to working data. Artifacts removed.")
+            
+            # Emit data_updated signal with current processed data
+            self.data_updated.emit(self.raw, f"ICA Cleaned | Excl: {excludes}")
             self.finished.emit()
 
         except ValueError:
@@ -413,12 +410,15 @@ class EEGWorker(QObject):
             self.raw.info['bads'] = bad_channels
             self.log_message.emit(f"Marked {len(bad_channels)} channel(s) as bad.")
 
-            # Perform interpolation
+            # Perform interpolation on working copy (cumulative)
             self.raw.interpolate_bads(reset_bads=True, verbose=True)
 
             self.log_message.emit(
                 f"Successfully interpolated channels: {', '.join(bad_channels)}"
             )
+            
+            # Emit data_updated signal with current processed data
+            self.data_updated.emit(self.raw, f"Interpolated: {', '.join(bad_channels)}")
             self.interpolation_done.emit(bad_channels)
             self.finished.emit()
 

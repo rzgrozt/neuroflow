@@ -488,6 +488,289 @@ class StatusLog(QFrame):
         self.log_area.clear()
 
 
+class EEGNavigationBar(QFrame):
+    """Clinical-grade EEG navigation control bar with refined styling."""
+    
+    # Signals for navigation changes
+    time_changed = pyqtSignal(float)
+    duration_changed = pyqtSignal(float)
+    scale_changed = pyqtSignal(float)
+    overlay_toggled = pyqtSignal(bool)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("eegNavBar")
+        self._setup_ui()
+        self._setup_style()
+    
+    def _setup_ui(self):
+        from PyQt6.QtWidgets import QSlider, QCheckBox
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(16, 12, 16, 12)
+        main_layout.setSpacing(12)
+        
+        # === Top Row: Overlay + Controls ===
+        top_row = QHBoxLayout()
+        top_row.setSpacing(20)
+        
+        # Overlay toggle with custom styling
+        self.chk_overlay = QCheckBox()
+        self.chk_overlay.setObjectName("overlayCheck")
+        self.chk_overlay.stateChanged.connect(
+            lambda s: self.overlay_toggled.emit(s == 2)
+        )
+        top_row.addWidget(self.chk_overlay)
+        
+        overlay_label = QLabel("Compare Original")
+        overlay_label.setObjectName("overlayLabel")
+        overlay_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_secondary']};
+                font-family: {FONTS['body']};
+                font-size: 12px;
+                font-weight: 500;
+                background: transparent;
+            }}
+        """)
+        top_row.addWidget(overlay_label)
+        
+        top_row.addStretch()
+        
+        # Duration control group
+        duration_group = self._create_param_group(
+            "WINDOW", "s", 1.0, 60.0, 10.0, 1.0
+        )
+        self.spin_duration = duration_group['spin']
+        self.spin_duration.valueChanged.connect(self.duration_changed.emit)
+        top_row.addLayout(duration_group['layout'])
+        
+        # Separator
+        sep1 = QFrame()
+        sep1.setFixedWidth(1)
+        sep1.setFixedHeight(24)
+        sep1.setStyleSheet(f"background: {COLORS['border_subtle']};")
+        top_row.addWidget(sep1)
+        
+        # Scale control group
+        scale_group = self._create_param_group(
+            "SCALE", "µV", 5.0, 500.0, 50.0, 10.0
+        )
+        self.spin_scale = scale_group['spin']
+        self.spin_scale.valueChanged.connect(self.scale_changed.emit)
+        top_row.addLayout(scale_group['layout'])
+        
+        main_layout.addLayout(top_row)
+        
+        # === Bottom Row: Time Slider ===
+        slider_row = QHBoxLayout()
+        slider_row.setSpacing(12)
+        
+        # Time icon/label
+        time_icon = QLabel("◀▶")
+        time_icon.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['accent_dim']};
+                font-size: 10px;
+                background: transparent;
+                padding: 0 4px;
+            }}
+        """)
+        slider_row.addWidget(time_icon)
+        
+        # Time slider with custom track
+        self.slider_time = QSlider(Qt.Orientation.Horizontal)
+        self.slider_time.setObjectName("timeSlider")
+        self.slider_time.setRange(0, 1000)
+        self.slider_time.setValue(0)
+        self.slider_time.valueChanged.connect(self._on_slider_changed)
+        slider_row.addWidget(self.slider_time, 1)
+        
+        # Time display
+        self.lbl_time = QLabel("0.0s")
+        self.lbl_time.setObjectName("timeDisplay")
+        self.lbl_time.setFixedWidth(70)
+        self.lbl_time.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        slider_row.addWidget(self.lbl_time)
+        
+        # Total duration display
+        self.lbl_total = QLabel("/ 0.0s")
+        self.lbl_total.setObjectName("totalDisplay")
+        self.lbl_total.setFixedWidth(60)
+        slider_row.addWidget(self.lbl_total)
+        
+        main_layout.addLayout(slider_row)
+    
+    def _create_param_group(self, label, unit, min_val, max_val, default, step):
+        """Create a labeled parameter control group."""
+        layout = QHBoxLayout()
+        layout.setSpacing(8)
+        
+        # Label
+        lbl = QLabel(label)
+        lbl.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_muted']};
+                font-family: {FONTS['mono']};
+                font-size: 9px;
+                font-weight: 600;
+                letter-spacing: 1px;
+                background: transparent;
+            }}
+        """)
+        layout.addWidget(lbl)
+        
+        # SpinBox
+        spin = NoScrollSpinBox()
+        spin.setRange(min_val, max_val)
+        spin.setValue(default)
+        spin.setSingleStep(step)
+        spin.setFixedWidth(65)
+        spin.setDecimals(1)
+        spin.setStyleSheet(f"""
+            QDoubleSpinBox {{
+                background: {COLORS['bg_void']};
+                color: {COLORS['text_accent']};
+                border: 1px solid {COLORS['border_subtle']};
+                border-radius: 4px;
+                padding: 4px 6px;
+                font-family: {FONTS['mono']};
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            QDoubleSpinBox:focus {{
+                border-color: {COLORS['accent_primary']};
+                background: {COLORS['bg_deep']};
+            }}
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                width: 0;
+                border: none;
+            }}
+        """)
+        layout.addWidget(spin)
+        
+        # Unit label
+        unit_lbl = QLabel(unit)
+        unit_lbl.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_muted']};
+                font-family: {FONTS['mono']};
+                font-size: 10px;
+                background: transparent;
+            }}
+        """)
+        layout.addWidget(unit_lbl)
+        
+        return {'layout': layout, 'spin': spin}
+    
+    def _on_slider_changed(self, value):
+        """Handle slider value changes."""
+        time_sec = value / 100.0
+        self.lbl_time.setText(f"{time_sec:.1f}s")
+        self.time_changed.emit(time_sec)
+    
+    def _setup_style(self):
+        self.setStyleSheet(f"""
+            #eegNavBar {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {COLORS['bg_elevated']},
+                    stop:1 {COLORS['bg_surface']});
+                border: 1px solid {COLORS['border_subtle']};
+                border-radius: 8px;
+            }}
+            
+            #overlayCheck {{
+                spacing: 0px;
+            }}
+            #overlayCheck::indicator {{
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                border: 2px solid {COLORS['border_default']};
+                background: {COLORS['bg_void']};
+            }}
+            #overlayCheck::indicator:hover {{
+                border-color: {COLORS['accent_dim']};
+            }}
+            #overlayCheck::indicator:checked {{
+                background: {COLORS['accent_primary']};
+                border-color: {COLORS['accent_primary']};
+            }}
+            #overlayCheck::indicator:checked:hover {{
+                background: {COLORS['accent_glow']};
+                border-color: {COLORS['accent_glow']};
+            }}
+            
+            #timeSlider {{
+                height: 20px;
+            }}
+            #timeSlider::groove:horizontal {{
+                background: {COLORS['bg_void']};
+                height: 6px;
+                border-radius: 3px;
+                border: 1px solid {COLORS['border_subtle']};
+            }}
+            #timeSlider::handle:horizontal {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {COLORS['accent_glow']},
+                    stop:1 {COLORS['accent_primary']});
+                width: 14px;
+                height: 14px;
+                margin: -5px 0;
+                border-radius: 7px;
+                border: 2px solid {COLORS['bg_elevated']};
+            }}
+            #timeSlider::handle:horizontal:hover {{
+                background: {COLORS['accent_glow']};
+                border-color: {COLORS['accent_glow']};
+            }}
+            #timeSlider::sub-page:horizontal {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {COLORS['accent_dim']},
+                    stop:1 {COLORS['accent_primary']});
+                border-radius: 3px;
+            }}
+            
+            #timeDisplay {{
+                color: {COLORS['text_accent']};
+                font-family: {FONTS['mono']};
+                font-size: 13px;
+                font-weight: 700;
+                background: transparent;
+            }}
+            
+            #totalDisplay {{
+                color: {COLORS['text_muted']};
+                font-family: {FONTS['mono']};
+                font-size: 11px;
+                background: transparent;
+            }}
+        """)
+    
+    def set_duration_range(self, total_seconds):
+        """Update slider range based on total recording duration."""
+        self.lbl_total.setText(f"/ {total_seconds:.1f}s")
+        duration = self.spin_duration.value()
+        max_slider = int(max(0, total_seconds - duration) * 100)
+        self.slider_time.setRange(0, max(1, max_slider))
+    
+    def get_start_time(self):
+        """Get current start time in seconds."""
+        return self.slider_time.value() / 100.0
+    
+    def get_duration(self):
+        """Get current window duration."""
+        return self.spin_duration.value()
+    
+    def get_scale(self):
+        """Get current amplitude scale."""
+        return self.spin_scale.value()
+    
+    def is_overlay_enabled(self):
+        """Check if overlay is enabled."""
+        return self.chk_overlay.isChecked()
+
+
 class CollapsibleBox(QFrame):
     """Collapsible accordion section with smooth toggle."""
 

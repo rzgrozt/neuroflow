@@ -40,12 +40,16 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon("assets/neuroflow_icon.png"))
         self.resize(1300, 850)
         self.raw_data = None
+        self.raw_original = None  # Backup of original data for overlay comparison
         self.epochs = None  # Holds epochs for manual inspection
         self.epochs_inspected = False  # Flag to track if epochs have been inspected
 
         # Pipeline history for traceability
         self.pipeline_history = []
         self.source_filename = None  # Base filename without extension
+        
+        # Current processing info for plot title
+        self.current_filter_info = "Raw Signal"
 
         self.thread = QThread()
         self.worker = EEGWorker()
@@ -63,6 +67,7 @@ class MainWindow(QMainWindow):
         self.worker.save_finished.connect(self.on_save_finished)
         self.worker.interpolation_done.connect(self.on_interpolation_done)
         self.worker.report_ready.connect(self.on_report_ready)
+        self.worker.data_updated.connect(self.on_data_updated)
 
         self.request_load_data.connect(self.worker.load_data)
         self.request_run_pipeline.connect(self.worker.run_pipeline)
@@ -188,7 +193,7 @@ class MainWindow(QMainWindow):
         # Import sidebar components
         from .sidebar import (
             SidebarTitle, SectionCard, ParamRow, ParamComboRow, ParamSpinRow,
-            ActionButton, StatusLog, CollapsibleBox
+            ActionButton, StatusLog, CollapsibleBox, EEGNavigationBar
         )
 
         # Create Splitter
@@ -382,8 +387,18 @@ class MainWindow(QMainWindow):
 
         self.tab_signal = QWidget()
         tab1_layout = QVBoxLayout(self.tab_signal)
-        tab1_layout.setContentsMargins(10, 10, 0, 0)
+        tab1_layout.setContentsMargins(12, 12, 12, 12)
+        tab1_layout.setSpacing(10)
 
+        # === EEG Navigation Bar (Clinical Controls) ===
+        self.nav_bar = EEGNavigationBar()
+        self.nav_bar.time_changed.connect(self._on_nav_time_changed)
+        self.nav_bar.duration_changed.connect(self._on_nav_duration_changed)
+        self.nav_bar.scale_changed.connect(self._on_nav_scale_changed)
+        self.nav_bar.overlay_toggled.connect(self._on_nav_overlay_toggled)
+        tab1_layout.addWidget(self.nav_bar)
+
+        # Canvas for plotting
         self.canvas = MplCanvas(self, width=5, height=4, dpi=100)
         self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         tab1_layout.addWidget(self.canvas)
@@ -413,6 +428,10 @@ class MainWindow(QMainWindow):
         
         # Splitter Stretch
         splitter.setStretchFactor(1, 4)
+        
+        # Initialize navigation state
+        self.current_start_time = 0.0
+        self.total_duration = 0.0
 
     def _on_section_expanded(self, expanded_section):
         """Collapse all sections except the one being expanded (accordion behavior)."""
@@ -448,6 +467,7 @@ class MainWindow(QMainWindow):
     def on_data_loaded(self, raw):
         """Called when worker successfully loads data."""
         self.raw_data = raw  # Store reference
+        self.raw_original = self.worker.raw_original  # Store original for overlay comparison
         self.btn_run.setEnabled(True)
         self.btn_sensors.setEnabled(True)
         self.btn_dataset_info.setEnabled(True)
@@ -457,6 +477,7 @@ class MainWindow(QMainWindow):
 
         # Reset pipeline history for new dataset
         self.pipeline_history = []
+        self.current_filter_info = "Raw Signal"
         
         # Extract and store source filename
         if self.worker.raw is not None and hasattr(self.worker.raw, 'filenames'):
@@ -479,6 +500,17 @@ class MainWindow(QMainWindow):
         self.combo_channels.addItems(self.raw_data.ch_names)
         self.btn_tfr.setEnabled(True)
         self.btn_conn.setEnabled(True)
+
+        # Initialize navigation controls for the loaded data
+        self.total_duration = self.raw_data.times[-1]
+        self.current_start_time = 0.0
+        
+        # Update nav bar with recording duration
+        if hasattr(self, 'nav_bar'):
+            self.nav_bar.set_duration_range(self.total_duration)
+
+        # Display initial time-series plot
+        self.update_time_series_plot()
 
         QMessageBox.information(self, "Success", "EEG Data Loaded Successfully.")
 
@@ -859,6 +891,95 @@ class MainWindow(QMainWindow):
 
         self.canvas.draw()
 
+    def update_time_series_plot(self, _state=None):
+        """Update the Signal Monitor with clinical stacked time-series plot.
+        
+        Args:
+            _state: Optional state value from checkbox/slider signals (ignored).
+        """
+        if self.raw_data is None:
+            return
+        
+        # Determine if overlay is requested
+        overlay_data = None
+        if hasattr(self, 'nav_bar') and self.nav_bar.is_overlay_enabled():
+            overlay_data = self.raw_original
+        
+        # Get navigation parameters from nav_bar
+        start_time = self.current_start_time
+        duration = self.nav_bar.get_duration() if hasattr(self, 'nav_bar') else 10.0
+        scale = self.nav_bar.get_scale() if hasattr(self, 'nav_bar') else 50.0
+        
+        title = f"EEG Time-Series (Clinical View)\n[{self.current_filter_info}]"
+        self.canvas.plot_time_series(
+            self.raw_data, 
+            title, 
+            overlay_data=overlay_data,
+            start_time=start_time,
+            duration=duration,
+            scale=scale
+        )
+
+    def on_data_updated(self, raw, info_str):
+        """Handle data_updated signal from worker after pipeline operations."""
+        self.raw_data = raw
+        self.current_filter_info = info_str
+        
+        # Log filter operation if pending
+        if hasattr(self, '_pending_filter_params') and self._pending_filter_params is not None:
+            from datetime import datetime
+            self.pipeline_history.append({
+                "timestamp": datetime.now().isoformat(timespec='seconds'),
+                "action": "filter",
+                "params": self._pending_filter_params
+            })
+            self._pending_filter_params = None
+
+        # Log ICA exclusion if pending
+        if hasattr(self, '_pending_ica_excludes') and self._pending_ica_excludes is not None:
+            from datetime import datetime
+            self.pipeline_history.append({
+                "timestamp": datetime.now().isoformat(timespec='seconds'),
+                "action": "ica_exclusion",
+                "params": {"excluded_components": self._pending_ica_excludes}
+            })
+            self._pending_ica_excludes = None
+        
+        # Update the time-series plot
+        self.update_time_series_plot()
+
+    def _on_nav_time_changed(self, time_sec):
+        """Handle time changes from navigation bar."""
+        if self.raw_data is None:
+            return
+        self.current_start_time = time_sec
+        self.update_time_series_plot()
+    
+    def _on_nav_duration_changed(self, duration):
+        """Handle duration changes from navigation bar."""
+        if self.raw_data is None:
+            return
+        # Update slider range when duration changes
+        if hasattr(self, 'nav_bar'):
+            self.nav_bar.set_duration_range(self.total_duration)
+        self.update_time_series_plot()
+    
+    def _on_nav_scale_changed(self, scale):
+        """Handle scale changes from navigation bar."""
+        if self.raw_data is None:
+            return
+        self.update_time_series_plot()
+    
+    def _on_nav_overlay_toggled(self, enabled):
+        """Handle overlay toggle from navigation bar."""
+        if self.raw_data is None:
+            return
+        self.update_time_series_plot()
+    
+    def on_nav_controls_changed(self, _value=None):
+        """Legacy handler - now handled by nav_bar signals."""
+        pass
+
     def open_channel_manager(self):
         """Open the Channel Manager dialog for bad channel interpolation."""
         if self.raw_data is None:
@@ -895,6 +1016,10 @@ class MainWindow(QMainWindow):
                 "method": "spherical_spline"
             }
         })
+        
+        # Update the time-series plot to reflect changes
+        self.current_filter_info = f"Interpolated: {channel_str}"
+        self.update_time_series_plot()
 
 
     def run_report_generation(self):
