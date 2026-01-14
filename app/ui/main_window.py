@@ -27,7 +27,8 @@ class MainWindow(QMainWindow):
     request_run_pipeline = pyqtSignal(float, float, float)
     request_run_ica = pyqtSignal()
     request_apply_ica = pyqtSignal(str)
-    request_compute_erp = pyqtSignal(str, float, float, bool)
+    request_create_epochs = pyqtSignal(str, float, float, bool)
+    request_compute_erp = pyqtSignal()
     request_compute_tfr = pyqtSignal(str, float, float, int, str)
     request_compute_connectivity = pyqtSignal()
     request_save_data = pyqtSignal(str)
@@ -73,6 +74,7 @@ class MainWindow(QMainWindow):
         self.request_run_pipeline.connect(self.worker.run_pipeline)
         self.request_run_ica.connect(self.worker.run_ica)
         self.request_apply_ica.connect(self.worker.apply_ica)
+        self.request_create_epochs.connect(self.worker.create_epochs)
         self.request_compute_erp.connect(self.worker.compute_erp)
         self.request_compute_tfr.connect(self.worker.compute_tfr)
         self.request_compute_connectivity.connect(self.worker.compute_connectivity)
@@ -305,34 +307,49 @@ class MainWindow(QMainWindow):
         section_ica.addWidget(card_ica)
         scroll_layout.addWidget(section_ica)
 
+        # Segmentation (Epoching) Section
+        section_epochs = CollapsibleBox("Segmentation (Epoching)", "✂️", expanded=False)
+
+        card_epochs = SectionCard("Epoch Creation", "📐")
+
+        self.param_events = ParamComboRow("Trigger Event:")
+        self.combo_events = self.param_events.combo
+        card_epochs.addWidget(self.param_events)
+
+        time_row = ParamSpinRow("Time Window:", -5.0, 5.0, -0.2, 0.5)
+        self.spin_tmin = time_row.spin_min
+        self.spin_tmax = time_row.spin_max
+        card_epochs.addWidget(time_row)
+
+        # Baseline correction checkbox
+        self.chk_erp_baseline = ParamCheckRow("Apply Baseline Correction (tmin to 0)", checked=True)
+        self.chk_erp_baseline.setToolTip("Subtract mean of baseline period (tmin to 0) from each epoch")
+        card_epochs.addWidget(self.chk_erp_baseline)
+
+        self.btn_create_epochs = ActionButton("✂️ Create Epochs", primary=True)
+        self.btn_create_epochs.clicked.connect(self.create_epochs_click)
+        self.btn_create_epochs.setEnabled(False)
+        self.btn_create_epochs.setToolTip("Create epochs from continuous data using selected event trigger")
+        card_epochs.addWidget(self.btn_create_epochs)
+
+        self.btn_inspect_epochs = ActionButton("🔍 Inspect & Reject Epochs")
+        self.btn_inspect_epochs.clicked.connect(self.inspect_epochs_click)
+        self.btn_inspect_epochs.setEnabled(False)
+        self.btn_inspect_epochs.setToolTip("Visually inspect epochs and manually reject artifacts")
+        card_epochs.addWidget(self.btn_inspect_epochs)
+
+        section_epochs.addWidget(card_epochs)
+        scroll_layout.addWidget(section_epochs)
+
         # ERP Analysis Section
         section_erp = CollapsibleBox("ERP Analysis", "📊", expanded=False)
 
         card_erp = SectionCard("Event-Related Potentials", "📈")
 
-        self.param_events = ParamComboRow("Event:")
-        self.combo_events = self.param_events.combo
-        card_erp.addWidget(self.param_events)
-
-        time_row = ParamSpinRow("Time:", -5.0, 5.0, -0.2, 0.5)
-        self.spin_tmin = time_row.spin_min
-        self.spin_tmax = time_row.spin_max
-        card_erp.addWidget(time_row)
-
-        # Baseline correction checkbox
-        self.chk_erp_baseline = ParamCheckRow("Apply Baseline Correction (tmin to 0)", checked=True)
-        self.chk_erp_baseline.setToolTip("Subtract mean of baseline period (tmin to 0) from each epoch")
-        card_erp.addWidget(self.chk_erp_baseline)
-
-        self.btn_inspect_epochs = ActionButton("Inspect & Reject Epochs")
-        self.btn_inspect_epochs.clicked.connect(self.inspect_epochs_click)
-        self.btn_inspect_epochs.setEnabled(False)
-        self.btn_inspect_epochs.setToolTip("Visually inspect epochs and manually reject artifacts")
-        card_erp.addWidget(self.btn_inspect_epochs)
-
         self.btn_erp = ActionButton("Compute & Plot ERP", primary=True)
         self.btn_erp.clicked.connect(self.compute_erp_click)
         self.btn_erp.setEnabled(False)
+        self.btn_erp.setToolTip("Compute ERP by averaging epochs (create epochs first)")
         card_erp.addWidget(self.btn_erp)
 
         section_erp.addWidget(card_erp)
@@ -405,7 +422,7 @@ class MainWindow(QMainWindow):
         scroll_layout.addWidget(section_advanced)
 
         # Accordion behavior
-        self.sidebar_sections = [section_data, section_ica, section_erp, section_advanced]
+        self.sidebar_sections = [section_data, section_ica, section_epochs, section_erp, section_advanced]
         for section in self.sidebar_sections:
             section.expanded.connect(self._on_section_expanded)
 
@@ -626,16 +643,40 @@ class MainWindow(QMainWindow):
             self.log_status("No events found for ERP analysis.")
             self.btn_erp.setEnabled(False)
             self.btn_inspect_epochs.setEnabled(False)
+            self.btn_create_epochs.setEnabled(False)
             return
 
         event_names = list(event_id_dict.keys())
 
-        # Populate ERP dropdown
+        # Populate ERP dropdown with "All Events" option first
+        self.combo_events.addItem("All Events")
         self.combo_events.addItems(event_names)
+        self.btn_create_epochs.setEnabled(True)
+        self.btn_inspect_epochs.setEnabled(False)  # Enabled after epochs are created
+        self.btn_erp.setEnabled(False)  # Enabled after epochs are created
+
+        self.log_status(f"Populated event dropdown with {len(event_id_dict)} events.")
+
+    def create_epochs_click(self):
+        """Create epochs from continuous data using selected event trigger."""
+        event_name = self.combo_events.currentText()
+        if not event_name:
+            self.show_error("Please select an event trigger first.")
+            return
+
+        tmin = self.spin_tmin.value()
+        tmax = self.spin_tmax.value()
+        apply_baseline = self.chk_erp_baseline.isChecked()
+
+        self.log_status(f"Creating epochs for event: {event_name}...")
+        self.request_create_epochs.emit(event_name, tmin, tmax, apply_baseline)
+
+        # Enable inspection and analysis buttons after epochs are created
         self.btn_inspect_epochs.setEnabled(True)
         self.btn_erp.setEnabled(True)
-
-        self.log_status(f"Populated ERP dropdown with {len(event_id_dict)} events.")
+        self.btn_tfr.setEnabled(True)
+        self.btn_conn.setEnabled(True)
+        self.epochs_inspected = False
 
     def inspect_epochs_click(self):
         """
@@ -643,46 +684,20 @@ class MainWindow(QMainWindow):
         User can click epochs to mark them as 'bad'. On close, bad epochs are dropped.
         This MUST run on Main Thread since epochs.plot() creates a GUI window.
         """
-        event_name = self.combo_events.currentText()
-        if not event_name:
-            self.show_error("Please select an event trigger first.")
+        # Check if epochs have been created
+        if self.worker.epochs is None:
+            self.show_error("No epochs available. Please create epochs first.")
             return
 
-        # Access worker data (events and raw)
-        if self.worker.raw is None:
-            self.show_error("No data loaded. Please load and preprocess data first.")
-            return
-
-        if self.worker.events is None or self.worker.event_id is None:
-            self.show_error("No events found in this dataset.")
-            return
-
-        if event_name not in self.worker.event_id:
-            self.show_error(f"Event '{event_name}' not found in data.")
-            return
-
-        tmin = self.spin_tmin.value()
-        tmax = self.spin_tmax.value()
-
-        self.log_status(f"Creating epochs for '{event_name}' (tmin={tmin}, tmax={tmax})...")
+        self.log_status("Opening interactive epoch viewer...")
 
         try:
-            # Create epochs on main thread using worker's data
-            specific_event_id = {event_name: self.worker.event_id[event_name]}
-            self.epochs = mne.Epochs(
-                self.worker.raw,
-                self.worker.events,
-                event_id=specific_event_id,
-                tmin=tmin,
-                tmax=tmax,
-                baseline=(tmin, 0),
-                preload=True,
-                verbose=False
-            )
+            # Copy epochs from worker to main window for inspection
+            self.epochs = self.worker.epochs.copy()
 
             n_epochs_before = len(self.epochs)
             self.log_status(
-                f"Created {n_epochs_before} epochs. Opening interactive viewer..."
+                f"Loaded {n_epochs_before} epochs. Opening interactive viewer..."
             )
             self.log_status("Click epochs to mark as bad. Close window when done.")
 
@@ -701,7 +716,7 @@ class MainWindow(QMainWindow):
                     scalings='auto',
                     n_epochs=10,
                     n_channels=n_channels,
-                    title=f"Epoch Inspection: {event_name} (Click to reject)"
+                    title=f"Epoch Inspection (Click to reject)"
                 )
             finally:
                 # Restore original style
@@ -712,6 +727,9 @@ class MainWindow(QMainWindow):
 
             n_epochs_after = len(self.epochs)
             n_rejected = n_epochs_before - n_epochs_after
+
+            # Update worker's epochs with the inspected/cleaned epochs
+            self.worker.epochs = self.epochs
 
             self.epochs_inspected = True
             self.log_status(
@@ -725,9 +743,6 @@ class MainWindow(QMainWindow):
                 "timestamp": datetime.now().isoformat(timespec='seconds'),
                 "action": "manual_epoch_rejection",
                 "params": {
-                    "event": event_name,
-                    "tmin": tmin,
-                    "tmax": tmax,
                     "kept": n_epochs_after,
                     "rejected": n_rejected
                 }
@@ -746,36 +761,15 @@ class MainWindow(QMainWindow):
 
     def compute_erp_click(self):
         """
-        Compute ERP. If epochs were manually inspected, use those.
-        Otherwise, request fresh epochs from the worker.
+        Compute ERP using pre-existing epochs from the worker.
         """
-        event_name = self.combo_events.currentText()
-        if not event_name:
+        # Check if epochs exist
+        if self.worker.epochs is None:
+            self.show_error("No epochs available. Please create epochs first using the Segmentation section.")
             return
-        tmin = self.spin_tmin.value()
-        tmax = self.spin_tmax.value()
-        apply_baseline = self.chk_erp_baseline.isChecked()
 
-        # If epochs were already inspected and cleaned, compute ERP locally
-        if self.epochs is not None and self.epochs_inspected:
-            self.log_status(f"Computing ERP from {len(self.epochs)} inspected epochs...")
-            try:
-                # Apply baseline correction if requested
-                if apply_baseline:
-                    self.epochs.apply_baseline((tmin, 0))
-                    self.log_status(f"Applied baseline correction: ({tmin}, 0)")
-                evoked = self.epochs.average()
-                self.log_status(
-                    f"ERP Computed from inspected epochs. Averaged {len(self.epochs)} epochs."
-                )
-                self.handle_erp_ready(evoked)
-            except Exception as e:
-                self.show_error(f"ERP Error: {str(e)}")
-                traceback.print_exc()
-        else:
-            # No inspection performed, use worker-based computation
-            self.log_status("Computing ERP (no manual inspection performed)...")
-            self.request_compute_erp.emit(event_name, tmin, tmax, apply_baseline)
+        self.log_status("Computing ERP...")
+        self.request_compute_erp.emit()
 
     def handle_erp_ready(self, evoked):
         """Plots the ERP using the new Interactive Viewer."""
@@ -801,8 +795,14 @@ class MainWindow(QMainWindow):
             self.show_error(f"Plotting Error: {e}")
 
     def compute_tfr_click(self):
+        # Check if epochs exist
+        if self.worker.epochs is None:
+            self.show_error("No epochs available. Please create epochs first using the Segmentation section.")
+            return
+
         ch = self.combo_channels.currentText()
         if not ch:
+            self.show_error("Please select a channel for TFR analysis.")
             return
         l_freq = self.spin_tfr_l.value()
         h_freq = self.spin_tfr_h.value()
@@ -849,10 +849,14 @@ class MainWindow(QMainWindow):
             self.show_error(f"TFR Plot Error: {e}")
 
     def compute_connectivity_click(self):
+        # Check if epochs exist
+        if self.worker.epochs is None:
+            self.show_error("No epochs available. Please create epochs first using the Segmentation section.")
+            return
+
         # Trigger connectivity (Alpha band 8-12Hz)
-        if hasattr(self, 'btn_conn'):
-            self.request_compute_connectivity.emit()
-            self.tabs.setCurrentWidget(self.tab_advanced)
+        self.request_compute_connectivity.emit()
+        self.tabs.setCurrentWidget(self.tab_advanced)
 
     def plot_connectivity(self, con):
         """

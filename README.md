@@ -118,8 +118,9 @@ python main.py
 2. **Verify Setup** - Check sensor positions and inspect dataset metadata
 3. **Preprocess** - Apply bandpass and notch filters
 4. **Remove Artifacts** - Run ICA to identify and exclude EOG/ECG components
-5. **Inspect Epochs** - Manually reject bad epochs using the interactive viewer
-6. **Analyze** - Compute ERPs, TFR, or connectivity measures
+5. **Create Epochs** - Segment continuous data around event triggers with configurable time windows
+6. **Inspect Epochs** - Manually reject bad epochs using the interactive viewer
+7. **Analyze** - Compute ERPs, TFR, or connectivity measures using the created epochs
 
 ---
 

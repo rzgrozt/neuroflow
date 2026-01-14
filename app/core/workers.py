@@ -43,6 +43,7 @@ class EEGWorker(QObject):
         self.ica = None  # Holds the fitted ICA object
         self.events = None
         self.event_id = None
+        self.epochs = None  # Holds the created Epochs object for analysis
 
     @pyqtSlot(str)
     def load_data(self, file_path: str):
@@ -216,14 +217,20 @@ class EEGWorker(QObject):
             traceback.print_exc()
 
     @pyqtSlot(str, float, float, bool)
-    def compute_erp(self, event_name: str, tmin: float, tmax: float, apply_baseline: bool = True):
-        """Epoch data around event trigger and average to create ERP.
+    def create_epochs(self, event_name: str, tmin: float, tmax: float, apply_baseline: bool = True):
+        """Create epochs from raw data around event triggers.
+
+        This method creates epochs and stores them in self.epochs for use by
+        analysis methods (ERP, TFR, Connectivity).
 
         Args:
-            event_name: Name of the event to epoch around.
+            event_name: Name of the event to epoch around (or 'All Events').
             tmin: Start time before event (seconds).
             tmax: End time after event (seconds).
             apply_baseline: If True, apply baseline correction from tmin to 0.
+
+        Returns:
+            Emits log_message with summary of created epochs.
         """
         if self.raw is None:
             self.error_occurred.emit("No data loaded.")
@@ -233,15 +240,20 @@ class EEGWorker(QObject):
             self.error_occurred.emit("No events found in this dataset.")
             return
 
-        if event_name not in self.event_id:
-            self.error_occurred.emit(f"Event '{event_name}' not found.")
-            return
-
         baseline_info = f"baseline=({tmin}, 0)" if apply_baseline else "no baseline"
-        self.log_message.emit(f"Computing ERP for: {event_name} (tmin={tmin}, tmax={tmax}, {baseline_info})...")
+        self.log_message.emit(
+            f"Creating epochs for: {event_name} (tmin={tmin}, tmax={tmax}, {baseline_info})..."
+        )
 
         try:
-            specific_event_id = {event_name: self.event_id[event_name]}
+            # Determine event_id based on selection
+            if event_name == "All Events":
+                specific_event_id = self.event_id
+            else:
+                if event_name not in self.event_id:
+                    self.error_occurred.emit(f"Event '{event_name}' not found.")
+                    return
+                specific_event_id = {event_name: self.event_id[event_name]}
 
             # Create epochs without baseline initially
             epochs = mne.Epochs(
@@ -249,14 +261,46 @@ class EEGWorker(QObject):
                 tmin=tmin, tmax=tmax, baseline=None, preload=True, verbose=False
             )
 
+            n_total = len(epochs)
+            n_dropped = len(epochs.drop_log) - n_total
+
             # Apply baseline correction if requested
             if apply_baseline:
                 epochs.apply_baseline((tmin, 0))
                 self.log_message.emit(f"Applied baseline correction: ({tmin}, 0)")
 
-            evoked = epochs.average()
+            # Store epochs for later use
+            self.epochs = epochs
 
-            self.log_message.emit(f"ERP Computed. Averaged {len(epochs)} epochs.")
+            summary = f"Created {n_total} epochs."
+            if n_dropped > 0:
+                summary += f" {n_dropped} dropped due to artifacts."
+
+            self.log_message.emit(summary)
+            self.finished.emit()
+
+        except Exception as e:
+            self.error_occurred.emit(f"Epoch Creation Error: {str(e)}")
+            traceback.print_exc()
+
+    @pyqtSlot()
+    def compute_erp(self):
+        """Compute ERP by averaging pre-existing epochs.
+
+        Requires epochs to be created first using create_epochs().
+        """
+        if self.epochs is None:
+            self.error_occurred.emit(
+                "No epochs available. Please create epochs first using the Segmentation section."
+            )
+            return
+
+        self.log_message.emit(f"Computing ERP from {len(self.epochs)} epochs...")
+
+        try:
+            evoked = self.epochs.average()
+
+            self.log_message.emit(f"ERP Computed. Averaged {len(self.epochs)} epochs.")
             self.erp_ready.emit(evoked)
             self.finished.emit()
 
@@ -268,6 +312,8 @@ class EEGWorker(QObject):
     def compute_tfr(self, ch_name: str, l_freq: float, h_freq: float,
                     n_cycles_base: int = 2, baseline_mode: str = 'percent'):
         """Compute Time-Frequency Representation using Morlet wavelets.
+
+        Requires epochs to be created first using create_epochs().
 
         Args:
             ch_name: Channel name to analyze.
@@ -283,8 +329,10 @@ class EEGWorker(QObject):
                           'mean' - Subtract mean baseline power
                           'none' - No baseline correction
         """
-        if self.raw is None:
-            self.error_occurred.emit("No data loaded.")
+        if self.epochs is None:
+            self.error_occurred.emit(
+                "No epochs available. Please create epochs first using the Segmentation section."
+            )
             return
 
         self.log_message.emit(
@@ -293,32 +341,19 @@ class EEGWorker(QObject):
         )
 
         try:
-            if ch_name not in self.raw.ch_names:
-                self.error_occurred.emit(f"Channel '{ch_name}' not found in data.")
+            # Pick channel from epochs
+            if ch_name not in self.epochs.ch_names:
+                self.error_occurred.emit(f"Channel '{ch_name}' not found in epochs.")
                 return
+
+            epochs_pick = self.epochs.copy().pick([ch_name])
 
             freqs = np.arange(l_freq, h_freq + 1, 1.0)
             n_cycles = freqs / n_cycles_base
 
-            raw_pick = self.raw.copy().pick([ch_name])
+            self.log_message.emit(f"Using {len(self.epochs)} epochs for TFR analysis...")
 
-            epoch_duration = 2.0
-            epochs = mne.make_fixed_length_epochs(
-                raw_pick,
-                duration=epoch_duration,
-                preload=True,
-                verbose=False
-            )
-
-            if len(epochs) == 0:
-                self.error_occurred.emit(
-                    f"TFR Error: Could not create epochs for channel {ch_name}."
-                )
-                return
-
-            self.log_message.emit(f"Created {len(epochs)} epochs for TFR analysis...")
-
-            power = epochs.compute_tfr(
+            power = epochs_pick.compute_tfr(
                 method='morlet',
                 freqs=freqs,
                 n_cycles=n_cycles,
@@ -329,8 +364,9 @@ class EEGWorker(QObject):
 
             # Apply baseline correction if requested
             if baseline_mode != 'none':
-                # Use first 20% of epoch as baseline (or first 0.4s for 2s epochs)
-                baseline = (None, 0.4)
+                # Use pre-stimulus period as baseline
+                tmin = self.epochs.tmin
+                baseline = (tmin, 0)
                 power.apply_baseline(baseline, mode=baseline_mode)
                 self.log_message.emit(f"Applied baseline correction: mode='{baseline_mode}'")
 
@@ -363,9 +399,14 @@ class EEGWorker(QObject):
 
     @pyqtSlot()
     def compute_connectivity(self):
-        """Compute Functional Connectivity using wPLI in Alpha Band (8-12Hz)."""
-        if self.raw is None:
-            self.error_occurred.emit("No data loaded.")
+        """Compute Functional Connectivity using wPLI in Alpha Band (8-12Hz).
+
+        Requires epochs to be created first using create_epochs().
+        """
+        if self.epochs is None:
+            self.error_occurred.emit(
+                "No epochs available. Please create epochs first using the Segmentation section."
+            )
             return
 
         if not HAS_CONNECTIVITY:
@@ -374,27 +415,14 @@ class EEGWorker(QObject):
             )
             return
 
-        self.log_message.emit("Computing Alpha Band Connectivity (wPLI)...")
+        self.log_message.emit(f"Computing Alpha Band Connectivity (wPLI) on {len(self.epochs)} epochs...")
 
         try:
-            tmin, tmax = 0, 4.0
-
-            if self.events is not None:
-                epochs = mne.Epochs(
-                    self.raw, self.events, event_id=None, tmin=tmin, tmax=tmax,
-                    baseline=None, preload=True, verbose=False,
-                    event_repeated='drop'
-                )
-            else:
-                epochs = mne.make_fixed_length_epochs(
-                    self.raw, duration=4.0, preload=True, verbose=False
-                )
-
             fmin, fmax = 8.0, 12.0
-            sfreq = self.raw.info['sfreq']
+            sfreq = self.epochs.info['sfreq']
 
             con = mne_connectivity.spectral_connectivity_epochs(
-                epochs, method='wpli', mode='multitaper', sfreq=sfreq,
+                self.epochs, method='wpli', mode='multitaper', sfreq=sfreq,
                 fmin=fmin, fmax=fmax, faverage=True, mt_adaptive=True,
                 n_jobs=1, verbose=False
             )
