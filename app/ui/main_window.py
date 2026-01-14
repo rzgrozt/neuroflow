@@ -923,8 +923,10 @@ class MainWindow(QMainWindow):
 
         # Initialize navigation controls for the loaded data
         if is_epochs:
-            # For epochs, use the epoch duration
-            self.total_duration = data.times[-1] - data.times[0]
+            # For epochs, total duration = n_epochs * single_epoch_duration
+            epoch_duration = data.times[-1] - data.times[0]
+            n_epochs = len(data)
+            self.total_duration = n_epochs * epoch_duration
         else:
             self.total_duration = data.times[-1]
         self.current_start_time = 0.0
@@ -1393,9 +1395,26 @@ class MainWindow(QMainWindow):
         Args:
             _state: Optional state value from checkbox/slider signals (ignored).
         """
+        from mne import BaseEpochs
+        import numpy as np
+        
         data = self.raw_data or getattr(self, 'epochs_data', None)
         if data is None:
             return
+        
+        # Handle epochs data: flatten 3D (n_epochs, n_channels, n_times) to 2D for visualization
+        plot_data = data
+        if isinstance(data, BaseEpochs):
+            import mne
+            # Get 3D array: (n_epochs, n_channels, n_times)
+            epochs_array = data.get_data()
+            # Transpose to (n_channels, n_epochs, n_times) then reshape to (n_channels, n_total_samples)
+            n_epochs, n_channels, n_times = epochs_array.shape
+            # Concatenate epochs along time axis: result is (n_channels, n_epochs * n_times)
+            flattened = epochs_array.transpose(1, 0, 2).reshape(n_channels, -1)
+            # Create temporary RawArray for plotting
+            info = data.info.copy()
+            plot_data = mne.io.RawArray(flattened, info, verbose=False)
         
         # Determine if overlay is requested (only for raw data)
         overlay_data = None
@@ -1409,7 +1428,7 @@ class MainWindow(QMainWindow):
         
         title = f"EEG Time-Series (Clinical View)\n[{self.current_filter_info}]"
         self.canvas.plot_time_series(
-            data, 
+            plot_data, 
             title, 
             overlay_data=overlay_data,
             start_time=start_time,

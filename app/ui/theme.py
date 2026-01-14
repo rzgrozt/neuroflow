@@ -167,7 +167,7 @@ class ModernAboutDialog(QDialog):
         version_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_layout.setContentsMargins(0, 4, 0, 8)
 
-        version_label = QLabel("v1.0.0")
+        version_label = QLabel("v2.0.0")
         version_label.setStyleSheet("""
             QLabel {
                 background: rgba(0, 180, 232, 0.15);
