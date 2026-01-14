@@ -397,6 +397,29 @@ class EEGWorker(QObject):
             self.error_occurred.emit(f"Save Error: {str(e)}")
             traceback.print_exc()
 
+    @pyqtSlot(str)
+    def save_epochs(self, filename: str):
+        """Save the current epochs object to a .fif file."""
+        if self.epochs is None:
+            self.error_occurred.emit("No epochs to save. Please create epochs first.")
+            return
+
+        self.log_message.emit(f"Saving epochs to {filename}...")
+        try:
+            if not filename.endswith('-epo.fif'):
+                if filename.endswith('.fif'):
+                    filename = filename[:-4] + '-epo.fif'
+                else:
+                    filename += '-epo.fif'
+
+            self.epochs.save(filename, overwrite=True)
+            self.save_finished.emit(filename)
+            self.log_message.emit(f"Epochs saved successfully to {filename}")
+
+        except Exception as e:
+            self.error_occurred.emit(f"Save Epochs Error: {str(e)}")
+            traceback.print_exc()
+
     @pyqtSlot()
     def compute_connectivity(self):
         """Compute Functional Connectivity using wPLI in Alpha Band (8-12Hz).
@@ -493,7 +516,7 @@ class EEGWorker(QObject):
             traceback.print_exc()
 
 
-    @pyqtSlot(object, object, object, object, list)
+    @pyqtSlot(object, object, object, object, list, dict)
     def generate_report(
         self,
         raw: object,
@@ -501,6 +524,7 @@ class EEGWorker(QObject):
         epochs: object,
         evoked: object,
         history_log: list,
+        segmentation_params: dict = None,
     ):
         """Generate an HTML analysis report using mne.Report.
 
@@ -510,6 +534,7 @@ class EEGWorker(QObject):
             epochs: The Epochs object (or None).
             evoked: The Evoked object (or None).
             history_log: List of dicts containing pipeline history.
+            segmentation_params: Dict containing tmin, tmax, event_name, baseline_status.
         """
         if raw is None:
             self.error_occurred.emit("No data loaded. Cannot generate report.")
@@ -528,6 +553,48 @@ class EEGWorker(QObject):
             if ica is not None:
                 self.log_message.emit("Adding ICA components to report...")
                 report.add_ica(ica, title="ICA Artifact Removal", inst=raw)
+
+            # Add Segmentation Details section
+            if segmentation_params:
+                self.log_message.emit("Adding segmentation details to report...")
+                event_name = segmentation_params.get('event_name', 'N/A')
+                tmin = segmentation_params.get('tmin', 'N/A')
+                tmax = segmentation_params.get('tmax', 'N/A')
+                baseline_status = segmentation_params.get('baseline_status', False)
+                baseline_text = "Applied" if baseline_status else "Not Applied"
+                
+                # Get epoch counts
+                total_epochs = 0
+                dropped_epochs = 0
+                if epochs is not None:
+                    total_epochs = len(epochs)
+                    drop_log = epochs.drop_log
+                    dropped_epochs = sum(1 for log in drop_log if len(log) > 0)
+                
+                segmentation_html = f"""
+                <div style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h2>Segmentation Details</h2>
+                    <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
+                        <tr style="background-color: #f2f2f2;">
+                            <td style="padding: 12px; border: 1px solid #ddd;"><strong>Event Trigger</strong></td>
+                            <td style="padding: 12px; border: 1px solid #ddd;">{event_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 12px; border: 1px solid #ddd;"><strong>Time Window</strong></td>
+                            <td style="padding: 12px; border: 1px solid #ddd;">{tmin}s to {tmax}s</td>
+                        </tr>
+                        <tr style="background-color: #f2f2f2;">
+                            <td style="padding: 12px; border: 1px solid #ddd;"><strong>Baseline Correction</strong></td>
+                            <td style="padding: 12px; border: 1px solid #ddd;">{baseline_text}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 12px; border: 1px solid #ddd;"><strong>Epoch Count</strong></td>
+                            <td style="padding: 12px; border: 1px solid #ddd;">{total_epochs} (Dropped: {dropped_epochs})</td>
+                        </tr>
+                    </table>
+                </div>
+                """
+                report.add_html(segmentation_html, title="Segmentation Details")
 
             # Add Epochs if available
             if epochs is not None:

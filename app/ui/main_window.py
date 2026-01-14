@@ -32,8 +32,9 @@ class MainWindow(QMainWindow):
     request_compute_tfr = pyqtSignal(str, float, float, int, str)
     request_compute_connectivity = pyqtSignal()
     request_save_data = pyqtSignal(str)
+    request_save_epochs = pyqtSignal(str)
     request_interpolate_bads = pyqtSignal(list)
-    request_generate_report = pyqtSignal(object, object, object, object, list)
+    request_generate_report = pyqtSignal(object, object, object, object, list, dict)
 
     def __init__(self):
         super().__init__()
@@ -79,6 +80,7 @@ class MainWindow(QMainWindow):
         self.request_compute_tfr.connect(self.worker.compute_tfr)
         self.request_compute_connectivity.connect(self.worker.compute_connectivity)
         self.request_save_data.connect(self.worker.save_data)
+        self.request_save_epochs.connect(self.worker.save_epochs)
         self.request_interpolate_bads.connect(self.worker.interpolate_bads)
         self.request_generate_report.connect(self.worker.generate_report)
 
@@ -98,6 +100,12 @@ class MainWindow(QMainWindow):
         save_action.setStatusTip("Save the processed data to .fif")
         save_action.triggered.connect(self.on_save_clean_data)
         file_menu.addAction(save_action)
+
+        save_epochs_action = QAction("💾 Save &Epoched Data (.fif)", self)
+        save_epochs_action.setShortcut("Ctrl+Shift+E")
+        save_epochs_action.setStatusTip("Save the epoched data to .fif")
+        save_epochs_action.triggered.connect(self.save_epochs_click)
+        file_menu.addAction(save_epochs_action)
 
         screenshot_action = QAction("S&creenshot", self)
         screenshot_action.setShortcut("Ctrl+Shift+S")
@@ -140,6 +148,20 @@ class MainWindow(QMainWindow):
         )
         if filename:
             self.request_save_data.emit(filename)
+
+    def save_epochs_click(self):
+        """Handle Save Epoched Data menu action."""
+        if self.epochs is None:
+            QMessageBox.warning(
+                self, "No Epochs", "Please create epochs first before saving."
+            )
+            return
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Save Epoched Data", "", "MNE FIF (*.fif)"
+        )
+        if filename:
+            self.request_save_epochs.emit(filename)
 
     def on_take_screenshot(self):
         screen = QApplication.primaryScreen()
@@ -1092,13 +1114,22 @@ class MainWindow(QMainWindow):
         # Gather evoked data if available
         evoked = getattr(self, 'evoked', None)
 
+        # Collect segmentation parameters from GUI
+        segmentation_params = {
+            'event_name': self.combo_events.currentText() if self.combo_events.currentText() else "N/A",
+            'tmin': self.spin_tmin.value(),
+            'tmax': self.spin_tmax.value(),
+            'baseline_status': self.chk_erp_baseline.isChecked(),
+        }
+
         # Emit signal to worker thread
         self.request_generate_report.emit(
             self.raw_data,
             self.worker.ica,
             self.epochs,
             evoked,
-            self.pipeline_history
+            self.pipeline_history,
+            segmentation_params
         )
 
     def on_report_ready(self, report_path: str):
