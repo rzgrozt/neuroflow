@@ -49,11 +49,19 @@ class ConnectivityDialog(QDialog):
 class DatasetInfoDialog(QDialog):
     """Dialog displaying dataset metadata and event statistics."""
 
-    def __init__(self, raw: mne.io.BaseRaw, parent=None, pipeline_history: list = None):
+    def __init__(self, data, parent=None, pipeline_history: list = None):
+        """Initialize DatasetInfoDialog.
+        
+        Args:
+            data: MNE Raw or Epochs object.
+            parent: Parent widget.
+            pipeline_history: List of pipeline step dictionaries.
+        """
         super().__init__(parent)
         self.setWindowTitle("Dataset Inspector")
         self.resize(550, 500)
-        self.raw = raw
+        self.raw = data  # Can be Raw or Epochs
+        self.is_epochs = isinstance(data, mne.BaseEpochs)
         self.pipeline_history = pipeline_history or []
 
         self._init_ui()
@@ -184,15 +192,25 @@ class DatasetInfoDialog(QDialog):
         layout.addWidget(bottom_bar)
 
     def _get_general_info(self) -> List[Tuple[str, str]]:
-        """Extract general metadata from the raw object."""
+        """Extract general metadata from the raw/epochs object."""
         info = self.raw.info
         info_pairs = []
 
-        filenames = self.raw.filenames
-        if filenames:
-            filename = os.path.basename(filenames[0])
+        # Handle filename attribute difference between Raw and Epochs
+        if self.is_epochs:
+            # Epochs has 'filename' (singular)
+            filename_attr = getattr(self.raw, 'filename', None)
+            if filename_attr:
+                filename = os.path.basename(filename_attr)
+            else:
+                filename = "Unknown"
         else:
-            filename = "Unknown"
+            # Raw has 'filenames' (plural list)
+            filenames = getattr(self.raw, 'filenames', [])
+            if filenames:
+                filename = os.path.basename(filenames[0])
+            else:
+                filename = "Unknown"
         info_pairs.append(("File", filename))
 
         meas_date = info.get("meas_date")
@@ -202,10 +220,17 @@ class DatasetInfoDialog(QDialog):
             date_str = "Not recorded"
         info_pairs.append(("Meas Date", date_str))
 
-        duration_sec = self.raw.times[-1]
-        minutes = int(duration_sec // 60)
-        seconds = int(duration_sec % 60)
-        info_pairs.append(("Duration", f"{minutes:02d}:{seconds:02d} ({duration_sec:.1f}s)"))
+        # Duration calculation differs for Raw vs Epochs
+        if self.is_epochs:
+            n_epochs = len(self.raw)
+            epoch_duration = self.raw.times[-1] - self.raw.times[0]
+            info_pairs.append(("Epochs", f"{n_epochs} epochs"))
+            info_pairs.append(("Epoch Duration", f"{epoch_duration:.2f}s"))
+        else:
+            duration_sec = self.raw.times[-1]
+            minutes = int(duration_sec // 60)
+            seconds = int(duration_sec % 60)
+            info_pairs.append(("Duration", f"{minutes:02d}:{seconds:02d} ({duration_sec:.1f}s)"))
 
         sfreq = info.get("sfreq", 0)
         info_pairs.append(("Sampling Rate", f"{sfreq:.1f} Hz"))

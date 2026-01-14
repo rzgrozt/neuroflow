@@ -1,7 +1,6 @@
 """EEG Processing Worker - Handles MNE-Python tasks on a separate thread."""
 
 import os
-import traceback
 import logging
 
 import mne
@@ -45,63 +44,140 @@ class EEGWorker(QObject):
         self.event_id = None
         self.epochs = None  # Holds the created Epochs object for analysis
 
+
+    def _read_file(self, file_path: str) -> mne.io.BaseRaw | None:
+        """Read EEG data from supported file formats.
+        
+        Args:
+            file_path: Path to the EEG data file.
+            
+        Returns:
+            MNE Raw object, or None if epoched data was loaded.
+            
+        Raises:
+            ValueError: If file format is not supported.
+        """
+        if file_path.endswith('.vhdr'):
+            return mne.io.read_raw_brainvision(file_path, preload=True)
+        elif file_path.endswith('-epo.fif') or file_path.endswith('_epo.fif'):
+            # Handle epoched data - store in self.epochs and return None
+            self.epochs = mne.read_epochs(file_path, preload=True)
+            return None
+        elif file_path.endswith('.fif'):
+            return mne.io.read_raw_fif(file_path, preload=True)
+        elif file_path.endswith('.edf'):
+            return mne.io.read_raw_edf(file_path, preload=True)
+        else:
+            filename = os.path.basename(file_path)
+            raise ValueError(
+                f"Unsupported format: {filename}. Please use .vhdr, .fif, or .edf"
+            )
+
+    def _set_channel_types(self, raw: mne.io.BaseRaw) -> None:
+        """Detect and set non-EEG channel types (EOG, ECG).
+        
+        Args:
+            raw: MNE Raw object to modify in place.
+        """
+        ch_types = {}
+        for ch_name in raw.ch_names:
+            name_lower = ch_name.lower()
+            if any(x in name_lower for x in ['eog', 'heog', 'veog']):
+                ch_types[ch_name] = 'eog'
+            elif any(x in name_lower for x in ['ecg', 'ekg']):
+                ch_types[ch_name] = 'ecg'
+
+        if ch_types:
+            self.log_message.emit(f"Setting channel types: {ch_types}")
+            raw.set_channel_types(ch_types)
+
+    def _set_montage(self, raw: mne.io.BaseRaw) -> None:
+        """Apply standard 10-20 montage if none is present.
+        
+        Args:
+            raw: MNE Raw object to modify in place.
+        """
+        if raw.get_montage() is None:
+            self.log_message.emit("Montage is missing. Applying standard_1020 montage...")
+            try:
+                montage = mne.channels.make_standard_montage('standard_1020')
+                raw.set_montage(montage, on_missing='ignore')
+                self.log_message.emit("Successfully applied standard_1020 montage.")
+            except Exception as e:
+                self.log_message.emit(f"Warning: Could not set montage: {e}")
+        else:
+            self.log_message.emit("Dataset already contains montage information.")
+
+    def _extract_events(self, raw: mne.io.BaseRaw) -> None:
+        """Extract events from annotations in the raw data.
+        
+        Args:
+            raw: MNE Raw object to extract events from.
+        """
+        try:
+            events, event_id = mne.events_from_annotations(raw, verbose=False)
+            self.events = events
+            self.event_id = event_id
+            self.log_message.emit(f"Events found: {len(events)} events extracted.")
+            self.events_loaded.emit(event_id)
+        except Exception:
+            self.log_message.emit("No events found in annotations.")
+            self.events_loaded.emit({})
+
+    def _extract_events_from_epochs(self, epochs: mne.BaseEpochs) -> None:
+        """Extract events from an Epochs object.
+
+        Args:
+            epochs: MNE Epochs object to extract events from.
+        """
+        try:
+            # Get event_id from epochs object
+            event_id = epochs.event_id
+            if event_id:
+                self.event_id = event_id
+                self.events = epochs.events
+                self.log_message.emit(f"Events found: {len(event_id)} event types extracted from epochs.")
+                self.events_loaded.emit(event_id)
+            else:
+                self.log_message.emit("No event information found in epochs.")
+                self.events_loaded.emit({})
+        except Exception:
+            self.log_message.emit("Could not extract events from epochs.")
+            self.events_loaded.emit({})
+
     @pyqtSlot(str)
-    def load_data(self, file_path: str):
+    def load_data(self, file_path: str) -> None:
         """Load EEG data from .vhdr, .fif, or .edf files."""
         filename = os.path.basename(file_path)
         self.log_message.emit(f"Function: load_data | Loading: {filename}")
 
         try:
-            if file_path.endswith('.vhdr'):
-                self.raw = mne.io.read_raw_brainvision(file_path, preload=True)
-            elif file_path.endswith('.fif'):
-                self.raw = mne.io.read_raw_fif(file_path, preload=True)
-            elif file_path.endswith('.edf'):
-                self.raw = mne.io.read_raw_edf(file_path, preload=True)
-            else:
-                self.error_occurred.emit(
-                    f"Unsupported format: {filename}. Please use .vhdr, .fif, or .edf"
+            self.raw = self._read_file(file_path)
+            
+            # Handle epoched data (returned None from _read_file)
+            if self.raw is None and self.epochs is not None:
+                self.log_message.emit(f"Loaded epoched data: {len(self.epochs)} epochs")
+                self.data_loaded.emit(self.epochs)
+
+                # Extract events from epochs object
+                self._extract_events_from_epochs(self.epochs)
+
+                self.log_message.emit(
+                    f"Successfully loaded {len(self.epochs.ch_names)} channels, "
+                    f"{len(self.epochs)} epochs."
                 )
+                self.finished.emit()
                 return
 
-            ch_types = {}
-            for ch_name in self.raw.ch_names:
-                name_lower = ch_name.lower()
-                if any(x in name_lower for x in ['eog', 'heog', 'veog']):
-                    ch_types[ch_name] = 'eog'
-                elif any(x in name_lower for x in ['ecg', 'ekg']):
-                    ch_types[ch_name] = 'ecg'
-
-            if ch_types:
-                self.log_message.emit(f"Setting channel types: {ch_types}")
-                self.raw.set_channel_types(ch_types)
-
-            if self.raw.get_montage() is None:
-                self.log_message.emit("Montage is missing. Applying standard_1020 montage...")
-                try:
-                    montage = mne.channels.make_standard_montage('standard_1020')
-                    self.raw.set_montage(montage, on_missing='ignore')
-                    self.log_message.emit("Successfully applied standard_1020 montage.")
-                except Exception as e:
-                    self.log_message.emit(f"Warning: Could not set montage: {e}")
-            else:
-                self.log_message.emit("Dataset already contains montage information.")
+            self._set_channel_types(self.raw)
+            self._set_montage(self.raw)
 
             # Store a copy of the original data for comparison
             self.raw_original = self.raw.copy()
             self.log_message.emit("Original data backup created for comparison.")
 
             self.data_loaded.emit(self.raw)
-
-            try:
-                events, event_id = mne.events_from_annotations(self.raw, verbose=False)
-                self.events = events
-                self.event_id = event_id
-                self.log_message.emit(f"Events found: {len(events)} events extracted.")
-                self.events_loaded.emit(event_id)
-            except Exception:
-                self.log_message.emit("No events found in annotations.")
-                self.events_loaded.emit({})
+            self._extract_events(self.raw)
 
             self.log_message.emit(
                 f"Successfully loaded {len(self.raw.ch_names)} channels, "
@@ -109,11 +185,13 @@ class EEGWorker(QObject):
             )
             self.finished.emit()
 
+        except ValueError as e:
+            self.error_occurred.emit(str(e))
         except NotImplementedError:
             self.error_occurred.emit("MNE Error: Feature not implemented for this file type.")
         except Exception as e:
             self.error_occurred.emit(f"Data Loading Error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("Failed to load EEG data from %s", file_path)
 
     @pyqtSlot(float, float, float)
     def run_pipeline(self, l_freq: float, h_freq: float, notch_freq: float):
@@ -154,7 +232,7 @@ class EEGWorker(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"Pipeline Error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("Pipeline execution failed")
 
     @pyqtSlot()
     def run_ica(self):
@@ -181,7 +259,7 @@ class EEGWorker(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"ICA Fit Error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("ICA fitting failed")
 
     @pyqtSlot(str)
     def apply_ica(self, exclude_str: str):
@@ -214,7 +292,7 @@ class EEGWorker(QObject):
             self.error_occurred.emit("Invalid format for components. Use '0, 1, 2'")
         except Exception as e:
             self.error_occurred.emit(f"ICA Apply Error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("ICA apply failed")
 
     @pyqtSlot(str, float, float, bool)
     def create_epochs(self, event_name: str, tmin: float, tmax: float, apply_baseline: bool = True):
@@ -281,7 +359,7 @@ class EEGWorker(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"Epoch Creation Error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("Epoch creation failed")
 
     @pyqtSlot()
     def compute_erp(self):
@@ -306,7 +384,7 @@ class EEGWorker(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"ERP Error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("ERP computation failed")
 
     @pyqtSlot(str, float, float, int, str)
     def compute_tfr(self, ch_name: str, l_freq: float, h_freq: float,
@@ -375,7 +453,7 @@ class EEGWorker(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"TFR Error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("TFR computation failed")
 
     @pyqtSlot(str)
     def save_data(self, filename: str):
@@ -395,7 +473,7 @@ class EEGWorker(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"Save Error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("Data save failed")
 
     @pyqtSlot(str)
     def save_epochs(self, filename: str):
@@ -418,7 +496,7 @@ class EEGWorker(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"Save Epochs Error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("Epochs save failed")
 
     @pyqtSlot()
     def compute_connectivity(self):
@@ -456,7 +534,7 @@ class EEGWorker(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"Connectivity Error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("Connectivity computation failed")
 
 
     @pyqtSlot(list)
@@ -513,7 +591,7 @@ class EEGWorker(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"Interpolation Error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("Channel interpolation failed")
 
 
     @pyqtSlot(object, object, object, object, list, dict)
@@ -623,7 +701,7 @@ class EEGWorker(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"Report Generation Error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("Report generation failed")
 
     def _format_history_html(self, history_log: list) -> str:
         """Convert pipeline history to formatted HTML.

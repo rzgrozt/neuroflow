@@ -26,8 +26,8 @@ class MplCanvas(FigureCanvasQTAgg):
         
         Parameters
         ----------
-        data : mne.io.Raw
-            The processed MNE Raw object to display.
+        data : mne.io.Raw or mne.Epochs
+            The processed MNE Raw or Epochs object to display.
         title : str
             Title for the plot.
         overlay_data : mne.io.Raw, optional
@@ -41,6 +41,8 @@ class MplCanvas(FigureCanvasQTAgg):
         n_channels : int, optional
             Number of channels to display. If None, shows all channels.
         """
+        from mne import BaseEpochs
+        
         self.axes.clear()
         
         if data is None:
@@ -51,18 +53,36 @@ class MplCanvas(FigureCanvasQTAgg):
             self.draw()
             return
         
+        is_epochs = isinstance(data, BaseEpochs)
+        
         # Extract data parameters
         sfreq = data.info['sfreq']
         ch_names = data.ch_names
-        total_duration = data.times[-1]
         
+        if is_epochs:
+            # For epochs, show the average across all epochs
+            times = data.times
+            total_duration = times[-1] - times[0]
+            # Get averaged data across epochs (channels × times)
+            raw_array = data.get_data().mean(axis=0)  # Average across epochs
+            # For epochs, use the full epoch time range (which may include negative times)
+            epoch_tmin = times[0]
+            epoch_tmax = times[-1]
+        else:
+            total_duration = data.times[-1]
+            times = None  # Will be set after slicing
+            raw_array = None
+            epoch_tmin = 0
+            epoch_tmax = total_duration
+
         # Clamp start_time to valid range
-        start_time = max(0, min(start_time, total_duration - duration))
-        end_time = min(start_time + duration, total_duration)
-        
-        # Calculate sample indices
-        start_sample = int(start_time * sfreq)
-        end_sample = int(end_time * sfreq)
+        if is_epochs:
+            # For epochs, always show the full epoch (ignore start_time/duration navigation)
+            start_time = epoch_tmin
+            end_time = epoch_tmax
+        else:
+            start_time = max(0, min(start_time, total_duration - duration))
+            end_time = min(start_time + duration, total_duration)
         
         # Limit channels if specified
         if n_channels is not None:
@@ -72,13 +92,29 @@ class MplCanvas(FigureCanvasQTAgg):
         
         # Downsample for performance if data is large
         max_points = 5000
-        total_samples = end_sample - start_sample
-        decim_factor = max(1, total_samples // max_points)
         
-        # Get the raw data array for selected channels
-        raw_array, times = data[:n_channels, start_sample:end_sample]
-        times = times[::decim_factor]
-        raw_array = raw_array[:, ::decim_factor]
+        if is_epochs:
+            # For epochs, use the full time array (already set to epoch times)
+            # No slicing needed - show the complete epoch
+            times = data.times
+            raw_array = raw_array[:n_channels, :]
+
+            total_samples = len(times)
+            decim_factor = max(1, total_samples // max_points)
+            times = times[::decim_factor]
+            raw_array = raw_array[:, ::decim_factor]
+        else:
+            # Calculate sample indices for raw data
+            start_sample = int(start_time * sfreq)
+            end_sample = int(end_time * sfreq)
+            
+            total_samples = end_sample - start_sample
+            decim_factor = max(1, total_samples // max_points)
+            
+            # Get the raw data array for selected channels
+            raw_array, times = data[:n_channels, start_sample:end_sample]
+            times = times[::decim_factor]
+            raw_array = raw_array[:, ::decim_factor]
         
         # Convert to microvolts
         raw_array_uv = raw_array * 1e6
@@ -87,8 +123,10 @@ class MplCanvas(FigureCanvasQTAgg):
         channel_spacing = 2 * scale
         offsets = np.arange(n_channels) * channel_spacing
         
-        # Plot overlay data first (background) if provided
-        if overlay_data is not None:
+        # Plot overlay data first (background) if provided (only for raw data)
+        if overlay_data is not None and not is_epochs:
+            start_sample = int(start_time * sfreq)
+            end_sample = int(end_time * sfreq)
             overlay_array, _ = overlay_data[:n_channels, start_sample:end_sample]
             overlay_array = overlay_array[:, ::decim_factor]
             overlay_array_uv = overlay_array * 1e6
@@ -135,6 +173,8 @@ class MplCanvas(FigureCanvasQTAgg):
         
         # Add scale bar indicator in corner
         scale_text = f"Scale: {scale:.0f} µV"
+        if is_epochs:
+            scale_text += f" (Avg of {len(data)} epochs)"
         self.axes.text(
             0.98, 0.02, scale_text,
             transform=self.axes.transAxes,

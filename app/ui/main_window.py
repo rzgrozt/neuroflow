@@ -18,6 +18,10 @@ from app.core.workers import EEGWorker
 from .canvas import MplCanvas
 from .dialogs import DatasetInfoDialog, ConnectivityDialog, ERPViewer, ChannelManagerDialog
 from .theme import ModernAboutDialog
+from .sidebar import (
+    SidebarTitle, SectionCard, ParamRow, ParamComboRow, ParamSpinRow,
+    ActionButton, StatusLog, CollapsibleBox, EEGNavigationBar, ParamCheckRow
+)
 
 
 class MainWindow(QMainWindow):
@@ -43,6 +47,7 @@ class MainWindow(QMainWindow):
         self.resize(1300, 850)
         self.raw_data = None
         self.raw_original = None  # Backup of original data for overlay comparison
+        self.epochs_data = None  # Holds loaded epochs data (from -epo.fif files)
         self.epochs = None  # Holds epochs for manual inspection
         self.epochs_inspected = False  # Flag to track if epochs have been inspected
 
@@ -207,26 +212,31 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.information(self, "Save Successful", f"Data saved to:\n{filename}")
 
-    def init_ui(self):
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+    def init_ui(self) -> None:
+        """Initialize the user interface by delegating to helper methods."""
+        self._setup_central_widget()
+        self._setup_sidebar()
+        self._setup_content_area()
+        self._connect_sidebar_signals()
 
-        # Import sidebar components
-        from .sidebar import (
-            SidebarTitle, SectionCard, ParamRow, ParamComboRow, ParamSpinRow,
-            ActionButton, StatusLog, CollapsibleBox, EEGNavigationBar, ParamCheckRow
-        )
+
+    def _setup_central_widget(self) -> None:
+        """Set up the central widget with main layout and splitter."""
+        self._central_widget = QWidget()
+        self.setCentralWidget(self._central_widget)
+        self._main_layout = QHBoxLayout(self._central_widget)
+        self._main_layout.setContentsMargins(0, 0, 0, 0)
+        self._main_layout.setSpacing(0)
 
         # Create Splitter
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(0)
-        splitter.setChildrenCollapsible(False)
-        main_layout.addWidget(splitter)
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.setHandleWidth(0)
+        self._splitter.setChildrenCollapsible(False)
+        self._main_layout.addWidget(self._splitter)
 
-        # Sidebar
+    def _setup_sidebar(self) -> None:
+        """Set up the sidebar with all sections: Data, ICA, Epochs, ERP, Advanced."""
+        # Sidebar container
         sidebar_widget = QWidget()
         sidebar_widget.setFixedWidth(330)
         
@@ -238,7 +248,7 @@ class MainWindow(QMainWindow):
         title_widget = SidebarTitle()
         sidebar_layout.addWidget(title_widget)
 
-        # Scrollable sidebar container (replaces QToolBox)
+        # Scrollable sidebar container
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
@@ -253,23 +263,40 @@ class MainWindow(QMainWindow):
         scroll_layout.setSpacing(5)
         scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # Data & Preprocessing Section
+        # Create sidebar sections
+        self._create_data_section(scroll_layout)
+        self._create_ica_section(scroll_layout)
+        self._create_epochs_section(scroll_layout)
+        self._create_erp_section(scroll_layout)
+        self._create_advanced_section(scroll_layout)
+
+        # Set scroll content and add to sidebar
+        scroll_area.setWidget(scroll_content)
+        sidebar_layout.addWidget(scroll_area)
+
+        # Status Log
+        self.status_log = StatusLog()
+        self.log_area = self.status_log.log_area
+        sidebar_layout.addWidget(self.status_log)
+
+        # Add Sidebar to Splitter
+        self._splitter.addWidget(sidebar_widget)
+
+    def _create_data_section(self, parent_layout: QVBoxLayout) -> None:
+        """Create the Data & Preprocessing section."""
         section_data = CollapsibleBox("Data & Preprocessing", "📂", expanded=False)
 
         # Dataset Card
         card_dataset = SectionCard("Dataset", "💾")
         self.btn_load = ActionButton("Load EEG Data")
-        self.btn_load.clicked.connect(self.browse_file)
         card_dataset.addWidget(self.btn_load)
 
         self.btn_sensors = ActionButton("Check Sensors")
         self.btn_sensors.setEnabled(False)
-        self.btn_sensors.clicked.connect(self.check_sensors)
         card_dataset.addWidget(self.btn_sensors)
 
         self.btn_dataset_info = ActionButton("Dataset Info")
         self.btn_dataset_info.setEnabled(False)
-        self.btn_dataset_info.clicked.connect(self.show_dataset_info)
         self.btn_dataset_info.setToolTip("View dataset metadata and event statistics")
         card_dataset.addWidget(self.btn_dataset_info)
         section_data.addWidget(card_dataset)
@@ -290,7 +317,6 @@ class MainWindow(QMainWindow):
         self.input_notch = self.param_notch.input
 
         self.btn_run = ActionButton("Run Pipeline", primary=True)
-        self.btn_run.clicked.connect(self.launch_pipeline)
         self.btn_run.setEnabled(False)
         card_pipeline.addWidget(self.btn_run)
         section_data.addWidget(card_pipeline)
@@ -299,21 +325,21 @@ class MainWindow(QMainWindow):
         card_channels = SectionCard("Channel Manager", "🔧")
 
         self.btn_channel_manager = ActionButton("Manage & Repair Channels")
-        self.btn_channel_manager.clicked.connect(self.open_channel_manager)
         self.btn_channel_manager.setEnabled(False)
         self.btn_channel_manager.setToolTip("Mark bad channels and interpolate using spherical spline")
         card_channels.addWidget(self.btn_channel_manager)
         section_data.addWidget(card_channels)
 
-        scroll_layout.addWidget(section_data)
+        parent_layout.addWidget(section_data)
+        self._section_data = section_data
 
-        # Artifact Removal Section
+    def _create_ica_section(self, parent_layout: QVBoxLayout) -> None:
+        """Create the Artifact Removal (ICA) section."""
         section_ica = CollapsibleBox("Artifact Removal", "🧹", expanded=False)
 
         card_ica = SectionCard("Independent Component Analysis", "🔬")
 
         self.btn_calc_ica = ActionButton("1. Calculate ICA")
-        self.btn_calc_ica.clicked.connect(self.run_ica_click)
         self.btn_calc_ica.setEnabled(False)
         card_ica.addWidget(self.btn_calc_ica)
 
@@ -322,14 +348,15 @@ class MainWindow(QMainWindow):
         card_ica.addWidget(self.param_ica_exclude)
 
         self.btn_apply_ica = ActionButton("2. Apply ICA")
-        self.btn_apply_ica.clicked.connect(self.apply_ica_click)
         self.btn_apply_ica.setEnabled(False)
         card_ica.addWidget(self.btn_apply_ica)
 
         section_ica.addWidget(card_ica)
-        scroll_layout.addWidget(section_ica)
+        parent_layout.addWidget(section_ica)
+        self._section_ica = section_ica
 
-        # Segmentation (Epoching) Section
+    def _create_epochs_section(self, parent_layout: QVBoxLayout) -> None:
+        """Create the Segmentation (Epoching) section."""
         section_epochs = CollapsibleBox("Segmentation (Epoching)", "✂️", expanded=False)
 
         card_epochs = SectionCard("Epoch Creation", "📐")
@@ -349,35 +376,36 @@ class MainWindow(QMainWindow):
         card_epochs.addWidget(self.chk_erp_baseline)
 
         self.btn_create_epochs = ActionButton("✂️ Create Epochs", primary=True)
-        self.btn_create_epochs.clicked.connect(self.create_epochs_click)
         self.btn_create_epochs.setEnabled(False)
         self.btn_create_epochs.setToolTip("Create epochs from continuous data using selected event trigger")
         card_epochs.addWidget(self.btn_create_epochs)
 
         self.btn_inspect_epochs = ActionButton("🔍 Inspect & Reject Epochs")
-        self.btn_inspect_epochs.clicked.connect(self.inspect_epochs_click)
         self.btn_inspect_epochs.setEnabled(False)
         self.btn_inspect_epochs.setToolTip("Visually inspect epochs and manually reject artifacts")
         card_epochs.addWidget(self.btn_inspect_epochs)
 
         section_epochs.addWidget(card_epochs)
-        scroll_layout.addWidget(section_epochs)
+        parent_layout.addWidget(section_epochs)
+        self._section_epochs = section_epochs
 
-        # ERP Analysis Section
+    def _create_erp_section(self, parent_layout: QVBoxLayout) -> None:
+        """Create the ERP Analysis section."""
         section_erp = CollapsibleBox("ERP Analysis", "📊", expanded=False)
 
         card_erp = SectionCard("Event-Related Potentials", "📈")
 
         self.btn_erp = ActionButton("Compute & Plot ERP", primary=True)
-        self.btn_erp.clicked.connect(self.compute_erp_click)
         self.btn_erp.setEnabled(False)
         self.btn_erp.setToolTip("Compute ERP by averaging epochs (create epochs first)")
         card_erp.addWidget(self.btn_erp)
 
         section_erp.addWidget(card_erp)
-        scroll_layout.addWidget(section_erp)
+        parent_layout.addWidget(section_erp)
+        self._section_erp = section_erp
 
-        # Advanced Analysis Section
+    def _create_advanced_section(self, parent_layout: QVBoxLayout) -> None:
+        """Create the Advanced Analysis section."""
         section_advanced = CollapsibleBox("Advanced Analysis", "🔮", expanded=False)
 
         # TFR Card
@@ -427,7 +455,6 @@ class MainWindow(QMainWindow):
         card_tfr.addWidget(self.param_tfr_baseline)
 
         self.btn_tfr = ActionButton("Compute TFR", primary=True)
-        self.btn_tfr.clicked.connect(self.compute_tfr_click)
         self.btn_tfr.setEnabled(False)
         card_tfr.addWidget(self.btn_tfr)
         section_advanced.addWidget(card_tfr)
@@ -436,30 +463,15 @@ class MainWindow(QMainWindow):
         card_conn = SectionCard("Connectivity (wPLI)", "🔗")
 
         self.btn_conn = ActionButton("Alpha Band (8-12Hz)")
-        self.btn_conn.clicked.connect(self.compute_connectivity_click)
         self.btn_conn.setEnabled(False)
         card_conn.addWidget(self.btn_conn)
         section_advanced.addWidget(card_conn)
 
-        scroll_layout.addWidget(section_advanced)
+        parent_layout.addWidget(section_advanced)
+        self._section_advanced = section_advanced
 
-        # Accordion behavior
-        self.sidebar_sections = [section_data, section_ica, section_epochs, section_erp, section_advanced]
-        for section in self.sidebar_sections:
-            section.expanded.connect(self._on_section_expanded)
-
-        # Set scroll content and add to sidebar
-        scroll_area.setWidget(scroll_content)
-        sidebar_layout.addWidget(scroll_area)
-
-        # Status Log
-        self.status_log = StatusLog()
-        self.log_area = self.status_log.log_area
-        sidebar_layout.addWidget(self.status_log)
-
-        # Add Sidebar to Splitter
-        splitter.addWidget(sidebar_widget)
-
+    def _setup_content_area(self) -> None:
+        """Set up the main content area with tabs, navigation bar, and canvas."""
         # Main Content
         self.tabs = QTabWidget()
 
@@ -468,12 +480,8 @@ class MainWindow(QMainWindow):
         tab1_layout.setContentsMargins(12, 12, 12, 12)
         tab1_layout.setSpacing(10)
 
-        # === EEG Navigation Bar (Clinical Controls) ===
+        # EEG Navigation Bar (Clinical Controls)
         self.nav_bar = EEGNavigationBar()
-        self.nav_bar.time_changed.connect(self._on_nav_time_changed)
-        self.nav_bar.duration_changed.connect(self._on_nav_duration_changed)
-        self.nav_bar.scale_changed.connect(self._on_nav_scale_changed)
-        self.nav_bar.overlay_toggled.connect(self._on_nav_overlay_toggled)
         tab1_layout.addWidget(self.nav_bar)
 
         # Canvas for plotting
@@ -502,14 +510,52 @@ class MainWindow(QMainWindow):
 
         self.tabs.addTab(self.tab_advanced, "Advanced Analysis")
 
-        splitter.addWidget(self.tabs)
+        self._splitter.addWidget(self.tabs)
         
         # Splitter Stretch
-        splitter.setStretchFactor(1, 4)
+        self._splitter.setStretchFactor(1, 4)
         
         # Initialize navigation state
         self.current_start_time = 0.0
         self.total_duration = 0.0
+
+    def _connect_sidebar_signals(self) -> None:
+        """Connect all sidebar widget signals to their respective slots."""
+        # Accordion behavior for sections
+        self.sidebar_sections = [
+            self._section_data, self._section_ica, self._section_epochs,
+            self._section_erp, self._section_advanced
+        ]
+        for section in self.sidebar_sections:
+            section.expanded.connect(self._on_section_expanded)
+
+        # Data & Preprocessing signals
+        self.btn_load.clicked.connect(self.browse_file)
+        self.btn_sensors.clicked.connect(self.check_sensors)
+        self.btn_dataset_info.clicked.connect(self.show_dataset_info)
+        self.btn_run.clicked.connect(self.launch_pipeline)
+        self.btn_channel_manager.clicked.connect(self.open_channel_manager)
+
+        # ICA signals
+        self.btn_calc_ica.clicked.connect(self.run_ica_click)
+        self.btn_apply_ica.clicked.connect(self.apply_ica_click)
+
+        # Epochs signals
+        self.btn_create_epochs.clicked.connect(self.create_epochs_click)
+        self.btn_inspect_epochs.clicked.connect(self.inspect_epochs_click)
+
+        # ERP signals
+        self.btn_erp.clicked.connect(self.compute_erp_click)
+
+        # Advanced analysis signals
+        self.btn_tfr.clicked.connect(self.compute_tfr_click)
+        self.btn_conn.clicked.connect(self.compute_connectivity_click)
+
+        # Navigation bar signals
+        self.nav_bar.time_changed.connect(self._on_nav_time_changed)
+        self.nav_bar.duration_changed.connect(self._on_nav_duration_changed)
+        self.nav_bar.scale_changed.connect(self._on_nav_scale_changed)
+        self.nav_bar.overlay_toggled.connect(self._on_nav_overlay_toggled)
 
     def _on_section_expanded(self, expanded_section):
         """Collapse all sections except the one being expanded (accordion behavior)."""
@@ -542,23 +588,41 @@ class MainWindow(QMainWindow):
         else:
             self.log_status("File selection cancelled.")
 
-    def on_data_loaded(self, raw):
+    def on_data_loaded(self, data):
         """Called when worker successfully loads data."""
-        self.raw_data = raw  # Store reference
-        self.raw_original = self.worker.raw_original  # Store original for overlay comparison
+        from mne import BaseEpochs
+        
+        # Determine if we loaded epochs or raw data
+        is_epochs = isinstance(data, BaseEpochs)
+        
+        if is_epochs:
+            self.epochs_data = data
+            self.raw_data = None
+            self.raw_original = None
+        else:
+            self.raw_data = data  # Store reference
+            self.raw_original = self.worker.raw_original  # Store original for overlay comparison
+            self.epochs_data = None
+            
         self.btn_run.setEnabled(True)
         self.btn_sensors.setEnabled(True)
         self.btn_dataset_info.setEnabled(True)
-        self.btn_calc_ica.setEnabled(True)  # Enable ICA
-        self.btn_apply_ica.setEnabled(True)
+        self.btn_calc_ica.setEnabled(not is_epochs)  # ICA typically on raw data
+        self.btn_apply_ica.setEnabled(not is_epochs)
         self.btn_channel_manager.setEnabled(True)  # Enable Channel Manager
 
         # Reset pipeline history for new dataset
         self.pipeline_history = []
-        self.current_filter_info = "Raw Signal"
+        self.current_filter_info = "Epoched Data" if is_epochs else "Raw Signal"
         
         # Extract and store source filename
-        if self.worker.raw is not None and hasattr(self.worker.raw, 'filenames'):
+        if is_epochs:
+            if hasattr(data, 'filename') and data.filename:
+                from pathlib import Path
+                self.source_filename = Path(data.filename).stem
+            else:
+                self.source_filename = "unknown_epochs"
+        elif self.worker.raw is not None and hasattr(self.worker.raw, 'filenames'):
             from pathlib import Path
             source_path = self.worker.raw.filenames[0]
             self.source_filename = Path(source_path).stem
@@ -570,17 +634,21 @@ class MainWindow(QMainWindow):
         self.pipeline_history.append({
             "timestamp": datetime.now().isoformat(timespec='seconds'),
             "action": "data_loaded",
-            "params": {"filename": self.source_filename}
+            "params": {"filename": self.source_filename, "type": "epochs" if is_epochs else "raw"}
         })
 
         # Populate Channels for TFR
         self.combo_channels.clear()
-        self.combo_channels.addItems(self.raw_data.ch_names)
+        self.combo_channels.addItems(data.ch_names)
         self.btn_tfr.setEnabled(True)
         self.btn_conn.setEnabled(True)
 
         # Initialize navigation controls for the loaded data
-        self.total_duration = self.raw_data.times[-1]
+        if is_epochs:
+            # For epochs, use the epoch duration
+            self.total_duration = data.times[-1] - data.times[0]
+        else:
+            self.total_duration = data.times[-1]
         self.current_start_time = 0.0
         
         # Update nav bar with recording duration
@@ -590,18 +658,21 @@ class MainWindow(QMainWindow):
         # Display initial time-series plot
         self.update_time_series_plot()
 
-        QMessageBox.information(self, "Success", "EEG Data Loaded Successfully.")
+        data_type = "Epoched" if is_epochs else "Raw"
+        QMessageBox.information(self, "Success", f"{data_type} EEG Data Loaded Successfully.")
 
     def check_sensors(self):
         """Visualize sensor positions."""
-        if self.raw_data:
+        data = self.raw_data or self.epochs_data
+        if data:
             self.log_status("Visualizing sensor positions...")
             # block=False ensures the GUI doesn't freeze
-            self.raw_data.plot_sensors(show_names=True, kind='topomap', block=False)
+            data.plot_sensors(show_names=True, kind='topomap', block=False)
 
     def show_dataset_info(self):
         """Display comprehensive dataset metadata in a dialog."""
-        if self.raw_data is None:
+        data = self.raw_data or self.epochs_data
+        if data is None:
             QMessageBox.warning(
                 self,
                 "No Data",
@@ -609,7 +680,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        dialog = DatasetInfoDialog(self.raw_data, parent=self, pipeline_history=self.pipeline_history)
+        dialog = DatasetInfoDialog(data, parent=self, pipeline_history=self.pipeline_history)
         dialog.exec()
 
     def launch_pipeline(self):
@@ -723,8 +794,7 @@ class MainWindow(QMainWindow):
             )
             self.log_status("Click epochs to mark as bad. Close window when done.")
 
-            # Open the interactive epoch viewer (blocks until window closes)
-            # scalings='auto' adapts to data, n_epochs=10 shows 10 at a time
+            # Open the interactive epoch viewer
             # Force light style via matplotlib to make traces visible on dark theme
             import matplotlib.pyplot as plt
             original_style = plt.rcParams.copy()
@@ -732,19 +802,53 @@ class MainWindow(QMainWindow):
             mne.viz.set_browser_backend('matplotlib')
 
             n_channels = min(30, len(self.epochs.ch_names))
-            try:
-                self.epochs.plot(
-                    block=True,
-                    scalings='auto',
-                    n_epochs=10,
-                    n_channels=n_channels,
-                    title=f"Epoch Inspection (Click to reject)"
-                )
-            finally:
-                # Restore original style
-                plt.rcParams.update(original_style)
 
-            # After the plot window is closed, drop the marked bad epochs
+            # Use block=False to avoid event loop conflict with PyQt
+            # Then wait for the figure to close using PyQt's event processing
+            fig = self.epochs.plot(
+                block=False,
+                show=True,
+                scalings='auto',
+                n_epochs=10,
+                n_channels=n_channels,
+                title=f"Epoch Inspection (Click to reject)"
+            )
+
+            # Store reference and connect to close event
+            self._epoch_fig = fig
+            self._n_epochs_before = n_epochs_before
+            self._original_style = original_style
+
+            # Connect to the figure's close event
+            fig.canvas.mpl_connect('close_event', self._on_epoch_fig_closed)
+
+            self.log_status("Epoch viewer opened. Click epochs to reject, then close the window.")
+
+        except Exception as e:
+            self.show_error(f"Epoch inspection error: {str(e)}")
+            traceback.print_exc()
+
+    def _on_epoch_fig_closed(self, event):
+        """Handle epoch figure close event - sync and drop bad epochs."""
+        import matplotlib.pyplot as plt
+
+        try:
+            fig = self._epoch_fig
+            n_epochs_before = self._n_epochs_before
+
+            # Get bad epochs from figure before closing
+            if hasattr(fig, 'mne') and hasattr(fig.mne, 'bad_epochs'):
+                bad_epochs = list(fig.mne.bad_epochs)
+                if bad_epochs:
+                    self.log_status(f"Marked epochs for rejection: {bad_epochs}")
+
+            # Close figure to trigger MNE's internal sync
+            plt.close(fig)
+
+            # Restore original style
+            plt.rcParams.update(self._original_style)
+
+            # Drop the marked bad epochs
             self.epochs.drop_bad()
 
             n_epochs_after = len(self.epochs)
@@ -777,8 +881,13 @@ class MainWindow(QMainWindow):
                 self.btn_erp.setEnabled(True)
                 self.log_status("Ready to compute ERP with cleaned epochs.")
 
+            # Clean up references
+            self._epoch_fig = None
+            self._n_epochs_before = None
+            self._original_style = None
+
         except Exception as e:
-            self.show_error(f"Epoch inspection error: {str(e)}")
+            self.log_status(f"Error processing epoch rejections: {str(e)}")
             traceback.print_exc()
 
     def compute_erp_click(self):
@@ -901,7 +1010,8 @@ class MainWindow(QMainWindow):
             if con_data.ndim == 3:
                 con_data = con_data[:, :, 0]  # Squeeze freq dimension if 1
 
-            node_names = self.raw_data.ch_names
+            data = self.raw_data or self.epochs_data
+            node_names = data.ch_names
 
             # Create Figure with show=False to prevent immediate popup
             # plot_connectivity_circle returns fig, ax
@@ -974,12 +1084,13 @@ class MainWindow(QMainWindow):
         Args:
             _state: Optional state value from checkbox/slider signals (ignored).
         """
-        if self.raw_data is None:
+        data = self.raw_data or getattr(self, 'epochs_data', None)
+        if data is None:
             return
         
-        # Determine if overlay is requested
+        # Determine if overlay is requested (only for raw data)
         overlay_data = None
-        if hasattr(self, 'nav_bar') and self.nav_bar.is_overlay_enabled():
+        if self.raw_data is not None and hasattr(self, 'nav_bar') and self.nav_bar.is_overlay_enabled():
             overlay_data = self.raw_original
         
         # Get navigation parameters from nav_bar
@@ -989,7 +1100,7 @@ class MainWindow(QMainWindow):
         
         title = f"EEG Time-Series (Clinical View)\n[{self.current_filter_info}]"
         self.canvas.plot_time_series(
-            self.raw_data, 
+            data, 
             title, 
             overlay_data=overlay_data,
             start_time=start_time,
@@ -1027,14 +1138,14 @@ class MainWindow(QMainWindow):
 
     def _on_nav_time_changed(self, time_sec):
         """Handle time changes from navigation bar."""
-        if self.raw_data is None:
+        if self.raw_data is None and getattr(self, 'epochs_data', None) is None:
             return
         self.current_start_time = time_sec
         self.update_time_series_plot()
     
     def _on_nav_duration_changed(self, duration):
         """Handle duration changes from navigation bar."""
-        if self.raw_data is None:
+        if self.raw_data is None and getattr(self, 'epochs_data', None) is None:
             return
         # Update slider range when duration changes
         if hasattr(self, 'nav_bar'):
@@ -1043,13 +1154,13 @@ class MainWindow(QMainWindow):
     
     def _on_nav_scale_changed(self, scale):
         """Handle scale changes from navigation bar."""
-        if self.raw_data is None:
+        if self.raw_data is None and getattr(self, 'epochs_data', None) is None:
             return
         self.update_time_series_plot()
     
     def _on_nav_overlay_toggled(self, enabled):
         """Handle overlay toggle from navigation bar."""
-        if self.raw_data is None:
+        if self.raw_data is None and getattr(self, 'epochs_data', None) is None:
             return
         self.update_time_series_plot()
     
@@ -1059,11 +1170,12 @@ class MainWindow(QMainWindow):
 
     def open_channel_manager(self):
         """Open the Channel Manager dialog for bad channel interpolation."""
-        if self.raw_data is None:
+        data = self.raw_data or getattr(self, 'epochs_data', None)
+        if data is None:
             self.show_error("No data loaded. Please load a dataset first.")
             return
 
-        dialog = ChannelManagerDialog(self.raw_data, parent=self)
+        dialog = ChannelManagerDialog(data, parent=self)
         dialog.interpolate_requested.connect(self._on_interpolate_channels)
         dialog.exec()
 
@@ -1101,7 +1213,8 @@ class MainWindow(QMainWindow):
 
     def run_report_generation(self):
         """Trigger report generation on the worker thread."""
-        if self.raw_data is None:
+        data = self.raw_data or getattr(self, 'epochs_data', None)
+        if data is None:
             QMessageBox.warning(
                 self,
                 "No Data Loaded",
@@ -1124,7 +1237,7 @@ class MainWindow(QMainWindow):
 
         # Emit signal to worker thread
         self.request_generate_report.emit(
-            self.raw_data,
+            data,
             self.worker.ica,
             self.epochs,
             evoked,

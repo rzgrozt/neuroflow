@@ -14,11 +14,11 @@
 
 | Feature | Description |
 |---------|-------------|
-| **Multi-Format Support** | Load BrainVision (`.vhdr`), MNE-Python (`.fif`), and European Data Format (`.edf`) files |
+| **Multi-Format Support** | Load BrainVision (`.vhdr`), MNE-Python (`.fif`), European Data Format (`.edf`), and pre-epoched (`-epo.fif`) files |
 | **Automatic Montage** | Detects missing channel locations and applies standard 10-20 montage |
 | **Dataset Inspector** | View recording metadata, sampling rate, duration, and event statistics |
 | **Sensor Visualization** | Interactive 2D topographic display of electrode positions |
-| **Data Export** | Save processed data to `.fif` format for future analysis |
+| **Data Export** | Save processed data and epochs to `.fif` format for future analysis |
 
 ### Signal Processing
 

@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QFrame, QLineEdit, QComboBox, QDoubleSpinBox, QTextEdit,
     QScrollArea, QSizePolicy, QGraphicsDropShadowEffect
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QEvent, QTimer
 from PyQt6.QtGui import QColor, QFont
 
 
@@ -553,6 +553,12 @@ class EEGNavigationBar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("eegNavBar")
+        
+        # Debounce timer for slider - prevents excessive plot updates
+        self.debounce_timer = QTimer(self)
+        self.debounce_timer.setSingleShot(True)
+        self.debounce_timer.timeout.connect(self._emit_time_change)
+        
         self._setup_ui()
         self._setup_style()
     
@@ -637,6 +643,7 @@ class EEGNavigationBar(QFrame):
         self.slider_time.setRange(0, 1000)
         self.slider_time.setValue(0)
         self.slider_time.valueChanged.connect(self._on_slider_changed)
+        self.slider_time.sliderReleased.connect(self._on_slider_released)
         slider_row.addWidget(self.slider_time, 1)
         
         # Time display
@@ -717,10 +724,22 @@ class EEGNavigationBar(QFrame):
         return {'layout': layout, 'spin': spin}
     
     def _on_slider_changed(self, value):
-        """Handle slider value changes."""
+        """Handle slider value changes with debounced signal emission."""
         time_sec = value / 100.0
+        # Update label immediately for responsive feedback
         self.lbl_time.setText(f"{time_sec:.1f}s")
+        # Restart debounce timer - signal emits only after user stops dragging
+        self.debounce_timer.start(100)
+
+    def _emit_time_change(self):
+        """Emit time_changed signal after debounce delay."""
+        time_sec = self.slider_time.value() / 100.0
         self.time_changed.emit(time_sec)
+    
+    def _on_slider_released(self):
+        """Force immediate update when slider is released."""
+        self.debounce_timer.stop()
+        self._emit_time_change()
     
     def _setup_style(self):
         self.setStyleSheet(f"""
