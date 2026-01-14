@@ -235,16 +235,37 @@ every contribution helps advance open neuroscience tools.
 
 ## 📜 License & Citation
 
-<strong>MIT License</strong>
-
-*Free to use, modify, and distribute.*<br/>
-*Built with 💙 for the neuroscience community.*
+<table>
+<tr>
+<td align="center">
 
 <br/>
 
-If you use NeuroFlow in your research, please consider citing:
+**MIT License**
 
-</div>
+*Free to use, modify, and distribute.*
+
+<br/>
+
+</td>
+<td align="center">
+
+<br/>
+
+**Cite This Work**
+
+Ozturk, R. (2025). *NeuroFlow* [Software].<br/>
+https://github.com/rzgrozt/neuroflow
+
+<br/>
+
+</td>
+</tr>
+</table>
+
+<details>
+<summary><strong>📋 BibTeX</strong></summary>
+<br/>
 
 ```bibtex
 @software{neuroflow,
@@ -255,7 +276,11 @@ If you use NeuroFlow in your research, please consider citing:
 }
 ```
 
-<div align="center">
+</details>
+
+<br/>
+
+*Built with 💙 for the neuroscience community.*
 
 ---
 
