@@ -262,19 +262,45 @@ class DatasetInfoDialog(QDialog):
         table.setAlternatingRowColors(True)
 
         try:
-            events, event_id = mne.events_from_annotations(self.raw, verbose=False)
-            event_counts = {}
-            for event in events:
-                eid = event[2]
-                event_counts[eid] = event_counts.get(eid, 0) + 1
+            if self.is_epochs:
+                # For Epochs objects, use event_id and events directly
+                event_id = self.raw.event_id
+                events = self.raw.events
+                
+                if event_id and len(events) > 0:
+                    # Count events by type
+                    event_counts = {}
+                    for event in events:
+                        eid = event[2]
+                        event_counts[eid] = event_counts.get(eid, 0) + 1
 
-            id_to_name = {v: k for k, v in event_id.items()}
+                    # Create reverse mapping: id -> name
+                    id_to_name = {v: k for k, v in event_id.items()}
 
-            table.setRowCount(len(event_counts))
-            for row, (eid, count) in enumerate(sorted(event_counts.items())):
-                name = id_to_name.get(eid, f"Unknown ({eid})")
-                table.setItem(row, 0, QTableWidgetItem(name))
-                table.setItem(row, 1, QTableWidgetItem(str(count)))
+                    table.setRowCount(len(event_counts))
+                    for row, (eid, count) in enumerate(sorted(event_counts.items())):
+                        name = id_to_name.get(eid, f"Unknown ({eid})")
+                        table.setItem(row, 0, QTableWidgetItem(name))
+                        table.setItem(row, 1, QTableWidgetItem(str(count)))
+                else:
+                    table.setRowCount(1)
+                    table.setItem(0, 0, QTableWidgetItem("No events found"))
+                    table.setItem(0, 1, QTableWidgetItem("-"))
+            else:
+                # For Raw objects, use events_from_annotations
+                events, event_id = mne.events_from_annotations(self.raw, verbose=False)
+                event_counts = {}
+                for event in events:
+                    eid = event[2]
+                    event_counts[eid] = event_counts.get(eid, 0) + 1
+
+                id_to_name = {v: k for k, v in event_id.items()}
+
+                table.setRowCount(len(event_counts))
+                for row, (eid, count) in enumerate(sorted(event_counts.items())):
+                    name = id_to_name.get(eid, f"Unknown ({eid})")
+                    table.setItem(row, 0, QTableWidgetItem(name))
+                    table.setItem(row, 1, QTableWidgetItem(str(count)))
 
         except Exception:
             table.setRowCount(1)
