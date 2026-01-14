@@ -1,175 +1,285 @@
-# NeuroFlow
+<div align="center">
 
-**NeuroFlow** is a professional-grade desktop application for EEG signal analysis, built with Python. It leverages **MNE-Python** for neuroscience computations and **PyQt6** for a modern, responsive user interface.
+<!-- Neural-inspired header with passion -->
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0d1b2a,50:1b4965,100:5fa8d3&height=200&section=header&text=NeuroFlow&fontSize=80&fontColor=bee9e8&fontAlignY=35&desc=Where%20Neurons%20Meet%20Algorithms&descSize=20&descAlignY=55&descAlign=50&animation=fadeIn" width="100%"/>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+<br/>
+
+<!-- Poetic tagline -->
+<em>
+<strong>"The brain is the last and grandest biological frontier"</strong> — James D. Watson
+</em>
+
+<br/><br/>
+
+<!-- Stylized description -->
+<p>
+<img src="https://img.shields.io/badge/⚡_Professional_Grade-EEG_Signal_Analysis-0d1b2a?style=for-the-badge&labelColor=1b4965" alt="Professional Grade"/>
+</p>
+
+<p>
+A desktop application born from the intersection of <strong>cognitive neuroscience</strong> and <strong>elegant code</strong>.<br/>
+Built with <strong>MNE-Python</strong> for rigorous signal processing and <strong>PyQt6</strong> for a refined experience.
+</p>
+
+<!-- Badges with cohesive styling -->
+<p>
+<a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-bee9e8?style=flat-square&labelColor=0d1b2a" alt="License: MIT"/></a>
+<a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.10+-5fa8d3?style=flat-square&labelColor=0d1b2a&logo=python&logoColor=bee9e8" alt="Python 3.10+"/></a>
+<a href="https://github.com/psf/black"><img src="https://img.shields.io/badge/Code_Style-Black-bee9e8?style=flat-square&labelColor=0d1b2a" alt="Code Style: Black"/></a>
+<a href="https://mne.tools/"><img src="https://img.shields.io/badge/Powered_by-MNE--Python-5fa8d3?style=flat-square&labelColor=0d1b2a" alt="MNE-Python"/></a>
+</p>
+
+</div>
 
 ---
 
-## Features
+<div align="center">
+<h2>🧠 The Vision</h2>
+</div>
 
-### Data Management
+> **NeuroFlow** exists because understanding the brain shouldn't require fighting with your tools.
+>
+> Every oscillation tells a story. Every ERP reveals cognition in action. This application is designed for researchers, clinicians, and students who share the profound curiosity about what makes us *think*, *feel*, and *perceive*.
 
-| Feature | Description |
-|---------|-------------|
-| **Multi-Format Support** | Load BrainVision (`.vhdr`), MNE-Python (`.fif`), European Data Format (`.edf`), and pre-epoched (`-epo.fif`) files |
-| **Automatic Montage** | Detects missing channel locations and applies standard 10-20 montage |
-| **Dataset Inspector** | View recording metadata, sampling rate, duration, and event statistics |
-| **Sensor Visualization** | Interactive 2D topographic display of electrode positions |
-| **Data Export** | Save processed data and epochs to `.fif` format for future analysis |
-| **Project Sessions** | Save/load complete analysis sessions (`.nflow`) including data, ICA, epochs, UI state, and pipeline history |
+---
 
-### Signal Processing
+## ✦ Core Capabilities
 
-| Feature | Description |
-|---------|-------------|
-| **High-Pass Filter** | Remove slow drifts and DC offsets |
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 📂 Data Management
+
+| Capability | Description |
+|:-----------|:------------|
+| **Multi-Format I/O** | BrainVision `.vhdr` • MNE `.fif` • EDF `.edf` • Epoched `-epo.fif` |
+| **Smart Montage** | Auto-detects missing locations, applies standard 10-20 |
+| **Dataset Inspector** | Metadata, sampling rate, duration, event statistics |
+| **Sensor Topology** | Interactive 2D electrode visualization |
+| **Session Persistence** | Save complete `.nflow` sessions with full state |
+
+</td>
+<td width="50%" valign="top">
+
+### ⚡ Signal Processing
+
+| Capability | Description |
+|:-----------|:------------|
+| **High-Pass Filter** | Remove DC offsets and slow drifts |
 | **Low-Pass Filter** | Eliminate high-frequency noise |
-| **Notch Filter** | Suppress power line noise (50/60 Hz) |
-| **Channel Interpolation** | Repair bad channels using spherical spline interpolation |
-| **ICA Decomposition** | FastICA-based artifact identification and removal (EOG, ECG) |
+| **Notch Filter** | Suppress 50/60 Hz power line interference |
+| **Interpolation** | Spherical spline repair for bad channels |
+| **ICA Decomposition** | FastICA artifact removal (EOG, ECG) |
 
-### Visualization
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-| Feature | Description |
-|---------|-------------|
-| **Clinical Time-Series View** | Stacked channel display with adjustable scale and duration |
-| **Time Navigation** | Slider-based scrolling through recordings with real-time updates |
-| **Original Data Overlay** | Compare processed vs. original data with transparency overlay |
-| **Cumulative Pipeline** | Destructive editing on working copy preserves original for comparison |
+### 📊 Analysis Suite
 
-### Analysis Tools
+| Capability | Description |
+|:-----------|:------------|
+| **Power Spectral Density** | Welch's method with μV²/Hz display |
+| **Event-Related Potentials** | Configurable baseline correction |
+| **Time-Frequency** | Morlet wavelets with multiple normalization modes |
+| **Connectivity** | Weighted Phase Lag Index (wPLI) |
 
-| Feature | Description |
-|---------|-------------|
-| **Power Spectral Density** | Real-time PSD computation using Welch's method with linear power display (μV²/Hz) |
-| **Event-Related Potentials** | Automatic event extraction with configurable baseline correction (tmin to 0) |
-| **Time-Frequency Analysis** | Morlet wavelet-based oscillatory power with adjustable n_cycles and baseline normalization modes (percent, logratio, zscore, mean) |
-| **Functional Connectivity** | Weighted Phase Lag Index (wPLI) for brain network analysis |
+</td>
+<td width="50%" valign="top">
 
-### Quality Control
+### 🔬 Quality & Reproducibility
 
-| Feature | Description |
-|---------|-------------|
-| **Manual Epoch Inspection** | Interactive epoch viewer for artifact rejection |
-| **Event Statistics** | Tabular view of event counts for data integrity verification |
-| **Screenshot Export** | Capture analysis views for reports and documentation |
-| **Pipeline History** | Automatic logging of all preprocessing steps with timestamps for reproducibility |
-| **HTML Report Generation** | Export complete analysis pipeline to a professional HTML report using MNE Report |
+| Capability | Description |
+|:-----------|:------------|
+| **Epoch Inspector** | Interactive artifact rejection |
+| **Pipeline History** | Timestamped preprocessing log |
+| **Screenshot Export** | Capture views for documentation |
+| **HTML Reports** | Professional MNE Report generation |
 
----
-
-## Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| Language | Python 3.10+ |
-| GUI Framework | PyQt6 |
-| Signal Processing | MNE-Python |
-| Connectivity Analysis | mne-connectivity |
-| Numerical Computing | NumPy, SciPy |
-| Visualization | Matplotlib |
-| Concurrency | QThread Worker Pattern |
+</td>
+</tr>
+</table>
 
 ---
 
-## Installation
+<div align="center">
+<h2>🎨 Visual Tour</h2>
+<em>Clinical-grade visualization meets intuitive design</em>
+</div>
 
-**Clone the repository:**
+<br/>
+
+<p align="center">
+<img width="90%" alt="Main Interface" src="https://github.com/user-attachments/assets/b68bb39c-87c1-4b69-92ab-b4d72b06a1d6"/>
+</p>
+
+<details>
+<summary><strong>📸 More Screenshots</strong></summary>
+<br/>
+
+<p align="center">
+<img width="60%" alt="Dataset Inspector" src="https://github.com/user-attachments/assets/512036e6-6feb-4138-a579-f5cadd0cfdf2"/>
+</p>
+
+<p align="center">
+<img width="50%" alt="Connectivity Analysis" src="https://github.com/user-attachments/assets/960faf1f-7cc6-4cd9-a9f7-1c081cb0cfa6"/>
+</p>
+
+<p align="center">
+<img width="90%" alt="Time-Frequency Analysis" src="https://github.com/user-attachments/assets/8b5bdb40-2609-4c35-917d-d94223242fa5"/>
+</p>
+
+<p align="center">
+<img width="90%" alt="ERP Visualization" src="https://github.com/user-attachments/assets/f7f64847-214c-4e64-97c1-1a5f7067d152"/>
+</p>
+
+<p align="center">
+<img width="90%" alt="Power Spectral Density" src="https://github.com/user-attachments/assets/ad09c2a3-50e7-48a8-8c61-59c275dbbdc7"/>
+</p>
+
+</details>
+
+---
+
+## 🛠 Technology
+
+<div align="center">
+
+| Layer | Technology | Purpose |
+|:-----:|:-----------|:--------|
+| 🐍 | **Python 3.10+** | Core language |
+| 🖥️ | **PyQt6** | Modern desktop GUI |
+| 🧠 | **MNE-Python** | Neuroscience signal processing |
+| 🔗 | **mne-connectivity** | Functional connectivity analysis |
+| 🔢 | **NumPy / SciPy** | Numerical computing backbone |
+| 📈 | **Matplotlib** | Publication-quality visualization |
+| ⚙️ | **QThread** | Non-blocking background processing |
+
+</div>
+
+---
+
+## 🚀 Quick Start
+
+### Installation
 
 ```bash
+# Clone the repository
 git clone https://github.com/rzgrozt/neuroflow.git
 cd neuroflow
-```
 
-**Create a virtual environment (recommended):**
-
-```bash
+# Create virtual environment (recommended)
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
-```
 
-**Install dependencies:**
-
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-Or install manually:
+<details>
+<summary><strong>📦 Manual dependency installation</strong></summary>
 
 ```bash
 pip install mne mne-connectivity PyQt6 PyQt6-Qt6 PyQt6-sip matplotlib numpy scipy scikit-learn
 ```
 
----
+</details>
 
-## Usage
-
-**Run the application:**
+### Launch
 
 ```bash
 python main.py
 ```
 
-### Workflow Overview
+---
 
-1. **Load Data** - Select your EEG file (`.vhdr`, `.fif`, or `.edf`)
-2. **Verify Setup** - Check sensor positions and inspect dataset metadata
-3. **Preprocess** - Apply bandpass and notch filters
-4. **Remove Artifacts** - Run ICA to identify and exclude EOG/ECG components
-5. **Create Epochs** - Segment continuous data around event triggers with configurable time windows
-6. **Inspect Epochs** - Manually reject bad epochs using the interactive viewer
-7. **Analyze** - Compute ERPs, TFR, or connectivity measures using the created epochs
+## 🔄 Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│   📁 LOAD          🔍 VERIFY         ⚡ PREPROCESS       🧹 ARTIFACTS       │
+│   ───────          ────────          ────────────       ───────────        │
+│   .vhdr .fif       Sensors &         Bandpass &         ICA for            │
+│   .edf files       Metadata          Notch filters      EOG/ECG            │
+│                                                                             │
+│         │               │                  │                  │            │
+│         └───────────────┴──────────────────┴──────────────────┘            │
+│                                    ▼                                        │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │                         📊 ANALYZE                                   │  │
+│   │   ─────────────────────────────────────────────────────────────     │  │
+│   │   Create Epochs → Inspect & Reject → ERP / TFR / Connectivity       │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Project Structure
+## 📁 Architecture
 
 ```
 neuroflow/
 ├── main.py                      # Application entry point
-├── requirements.txt             # Python dependencies
-├── README.md
+├── requirements.txt             # Dependencies
 └── app/
-    ├── __init__.py
     ├── core/
-    │   ├── __init__.py
-    │   └── workers.py           # EEGWorker: MNE processing on background thread
+    │   └── workers.py           # EEGWorker: Background MNE processing
     └── ui/
-        ├── __init__.py
-        ├── canvas.py            # MplCanvas: Matplotlib-PyQt6 integration
-        ├── dialogs.py           # DatasetInfoDialog, ConnectivityDialog, ERPViewer
-        └── main_window.py       # MainWindow: Primary application interface
+        ├── canvas.py            # Matplotlib-PyQt6 integration
+        ├── dialogs.py           # Specialized visualization dialogs
+        └── main_window.py       # Primary application interface
 ```
 
-### Architecture
+<div align="center">
 
-The application follows a separation of concerns pattern with multithreading:
+| Component | Thread | Responsibility |
+|:----------|:------:|:---------------|
+| **EEGWorker** | Background | MNE I/O, heavy computation, Qt signals |
+| **MainWindow** | Main | UI layout, user interaction, plot updates |
+| **Dialogs** | Main | Modular popup visualizations |
 
-- **`EEGWorker`** (Background Thread) - Handles all MNE I/O and heavy computations, communicates via Qt signals
-- **`MainWindow`** (Main Thread) - Manages UI layout, user interactions, and plot updates
-- **Dialogs** - Modular popup windows for specialized visualizations
-
----
-
-## Screenshots
-
-<img width="1299" height="887" alt="image" src="https://github.com/user-attachments/assets/b68bb39c-87c1-4b69-92ab-b4d72b06a1d6" />
-
-<img width="644" height="789" alt="image" src="https://github.com/user-attachments/assets/512036e6-6feb-4138-a579-f5cadd0cfdf2" />
-
-<img width="555" height="483" alt="image" src="https://github.com/user-attachments/assets/960faf1f-7cc6-4cd9-a9f7-1c081cb0cfa6" />
-
-<img width="1302" height="877" alt="image" src="https://github.com/user-attachments/assets/8b5bdb40-2609-4c35-917d-d94223242fa5" />
-
-<img width="1278" height="863" alt="image" src="https://github.com/user-attachments/assets/f7f64847-214c-4e64-97c1-1a5f7067d152" />
-
-<img width="1299" height="874" alt="image" src="https://github.com/user-attachments/assets/ad09c2a3-50e7-48a8-8c61-59c275dbbdc7" />
+</div>
 
 ---
 
-## License
+<div align="center">
 
-This project is open-source under the MIT License.
+## 🤝 Contributing
+
+Contributions are welcome! Whether you're fixing bugs, adding features, or improving documentation—<br/>
+every contribution helps advance open neuroscience tools.
+
+</div>
+
+---
+
+<div align="center">
+
+## 📜 License
+
+<strong>MIT License</strong>
+
+*Free to use, modify, and distribute.*<br/>
+*Built with 💙 for the neuroscience community.*
+
+<br/>
+
+---
+
+<br/>
+
+<em>
+"What we know is a drop, what we don't know is an ocean."<br/>
+— Isaac Newton
+</em>
+
+<br/><br/>
+
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0d1b2a,50:1b4965,100:5fa8d3&height=100&section=footer" width="100%"/>
+
+</div>
