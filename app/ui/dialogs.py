@@ -302,7 +302,8 @@ class DatasetInfoDialog(QDialog):
                     table.setItem(row, 0, QTableWidgetItem(name))
                     table.setItem(row, 1, QTableWidgetItem(str(count)))
 
-        except Exception:
+        except (ValueError, RuntimeError, AttributeError) as e:
+            print(f"Event table creation error: {e}")
             table.setRowCount(1)
             table.setItem(0, 0, QTableWidgetItem("No events found"))
             table.setItem(0, 1, QTableWidgetItem("-"))

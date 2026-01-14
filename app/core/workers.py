@@ -122,8 +122,8 @@ class EEGWorker(QObject):
             self.event_id = event_id
             self.log_message.emit(f"Events found: {len(events)} events extracted.")
             self.events_loaded.emit(event_id)
-        except Exception:
-            self.log_message.emit("No events found in annotations.")
+        except (ValueError, RuntimeError) as e:
+            self.log_message.emit(f"Event extraction warning: {e}")
             self.events_loaded.emit({})
 
     def _extract_events_from_epochs(self, epochs: mne.BaseEpochs) -> None:
@@ -143,8 +143,8 @@ class EEGWorker(QObject):
             else:
                 self.log_message.emit("No event information found in epochs.")
                 self.events_loaded.emit({})
-        except Exception:
-            self.log_message.emit("Could not extract events from epochs.")
+        except (ValueError, RuntimeError, AttributeError) as e:
+            self.log_message.emit(f"Event extraction warning: {e}")
             self.events_loaded.emit({})
 
     @pyqtSlot(str)

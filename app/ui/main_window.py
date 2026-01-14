@@ -286,6 +286,18 @@ class MainWindow(QMainWindow):
         )
 
         if file_path:
+            # Security warning before loading untrusted session files
+            reply = QMessageBox.warning(
+                self,
+                "Security Warning",
+                "Loading project files executes code. Only load files from trusted sources.\n\nDo you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.No:
+                return
+            
             # Store the project path for future saves
             self.current_project_path = file_path
             self.request_load_session.emit(file_path)
