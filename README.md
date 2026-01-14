@@ -43,9 +43,9 @@
 
 | Feature | Description |
 |---------|-------------|
-| **Power Spectral Density** | Real-time PSD computation using Welch's method |
-| **Event-Related Potentials** | Automatic event extraction with averaged evoked responses |
-| **Time-Frequency Analysis** | Morlet wavelet-based oscillatory power visualization |
+| **Power Spectral Density** | Real-time PSD computation using Welch's method with linear power display (μV²/Hz) |
+| **Event-Related Potentials** | Automatic event extraction with configurable baseline correction (tmin to 0) |
+| **Time-Frequency Analysis** | Morlet wavelet-based oscillatory power with adjustable n_cycles and baseline normalization modes (percent, logratio, zscore, mean) |
 | **Functional Connectivity** | Weighted Phase Lag Index (wPLI) for brain network analysis |
 
 ### Quality Control

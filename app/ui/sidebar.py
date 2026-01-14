@@ -285,6 +285,59 @@ class ParamRow(QWidget):
         self.input.setEnabled(enabled)
 
 
+class ParamCheckRow(QWidget):
+    """Parameter row with a checkbox and label."""
+
+    stateChanged = pyqtSignal(bool)
+
+    def __init__(self, label: str, checked: bool = True, parent=None):
+        super().__init__(parent)
+        from PyQt6.QtWidgets import QCheckBox
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(WIDGET_SPACING)
+
+        self.checkbox = QCheckBox()
+        self.checkbox.setChecked(checked)
+        self.checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
+                border: 1px solid {COLORS['border_subtle']};
+                background: {COLORS['bg_deep']};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {COLORS['accent_primary']};
+                border-color: {COLORS['accent_primary']};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {COLORS['accent_primary']};
+            }}
+        """)
+        self.checkbox.stateChanged.connect(lambda s: self.stateChanged.emit(s == 2))
+        layout.addWidget(self.checkbox)
+
+        self.label = QLabel(label)
+        self.label.setStyleSheet(LABEL_STYLE)
+        layout.addWidget(self.label)
+        layout.addStretch()
+
+    def isChecked(self) -> bool:
+        return self.checkbox.isChecked()
+
+    def setChecked(self, checked: bool):
+        self.checkbox.setChecked(checked)
+
+    def setEnabled(self, enabled: bool):
+        self.checkbox.setEnabled(enabled)
+        self.label.setEnabled(enabled)
+
+
 class ParamComboRow(QWidget):
     """Row with fixed-width label and styled ComboBox."""
 

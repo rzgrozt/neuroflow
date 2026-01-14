@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFileDialog, QFrame, QMessageBox,
     QTabWidget, QApplication, QSplitter,
-    QScrollArea, QSizePolicy
+    QScrollArea, QSizePolicy, QLabel, QSpinBox
 )
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
@@ -27,8 +27,8 @@ class MainWindow(QMainWindow):
     request_run_pipeline = pyqtSignal(float, float, float)
     request_run_ica = pyqtSignal()
     request_apply_ica = pyqtSignal(str)
-    request_compute_erp = pyqtSignal(str, float, float)
-    request_compute_tfr = pyqtSignal(str, float, float)
+    request_compute_erp = pyqtSignal(str, float, float, bool)
+    request_compute_tfr = pyqtSignal(str, float, float, int, str)
     request_compute_connectivity = pyqtSignal()
     request_save_data = pyqtSignal(str)
     request_interpolate_bads = pyqtSignal(list)
@@ -193,7 +193,7 @@ class MainWindow(QMainWindow):
         # Import sidebar components
         from .sidebar import (
             SidebarTitle, SectionCard, ParamRow, ParamComboRow, ParamSpinRow,
-            ActionButton, StatusLog, CollapsibleBox, EEGNavigationBar
+            ActionButton, StatusLog, CollapsibleBox, EEGNavigationBar, ParamCheckRow
         )
 
         # Create Splitter
@@ -319,6 +319,11 @@ class MainWindow(QMainWindow):
         self.spin_tmax = time_row.spin_max
         card_erp.addWidget(time_row)
 
+        # Baseline correction checkbox
+        self.chk_erp_baseline = ParamCheckRow("Apply Baseline Correction (tmin to 0)", checked=True)
+        self.chk_erp_baseline.setToolTip("Subtract mean of baseline period (tmin to 0) from each epoch")
+        card_erp.addWidget(self.chk_erp_baseline)
+
         self.btn_inspect_epochs = ActionButton("Inspect & Reject Epochs")
         self.btn_inspect_epochs.clicked.connect(self.inspect_epochs_click)
         self.btn_inspect_epochs.setEnabled(False)
@@ -347,6 +352,40 @@ class MainWindow(QMainWindow):
         self.spin_tfr_l = freq_row.spin_min
         self.spin_tfr_h = freq_row.spin_max
         card_tfr.addWidget(freq_row)
+
+        # TFR n_cycles parameter (frequency divisor)
+        tfr_cycles_row = QWidget()
+        tfr_cycles_layout = QHBoxLayout(tfr_cycles_row)
+        tfr_cycles_layout.setContentsMargins(0, 0, 0, 0)
+        tfr_cycles_layout.setSpacing(8)
+        tfr_cycles_label = QLabel("Cycles:")
+        tfr_cycles_label.setFixedWidth(55)
+        tfr_cycles_label.setStyleSheet("color: #9498a8; font-size: 12px;")
+        tfr_cycles_layout.addWidget(tfr_cycles_label)
+        self.spin_tfr_cycles = QSpinBox()
+        self.spin_tfr_cycles.setRange(1, 10)
+        self.spin_tfr_cycles.setValue(2)
+        self.spin_tfr_cycles.setToolTip("n_cycles = freqs / this value. Higher = better temporal resolution")
+        self.spin_tfr_cycles.setStyleSheet("""
+            QSpinBox {
+                background: #0a0c14;
+                color: #e8eaf0;
+                border: 1px solid #1e2233;
+                border-radius: 6px;
+                padding: 5px 8px;
+                font-size: 12px;
+            }
+            QSpinBox:focus { border-color: #00b4d8; }
+        """)
+        tfr_cycles_layout.addWidget(self.spin_tfr_cycles)
+        card_tfr.addWidget(tfr_cycles_row)
+
+        # TFR baseline mode combobox
+        self.param_tfr_baseline = ParamComboRow("Baseline:")
+        self.combo_tfr_baseline = self.param_tfr_baseline.combo
+        self.combo_tfr_baseline.addItems(['percent', 'logratio', 'zscore', 'mean', 'none'])
+        self.combo_tfr_baseline.setToolTip("Baseline correction mode for TFR power normalization")
+        card_tfr.addWidget(self.param_tfr_baseline)
 
         self.btn_tfr = ActionButton("Compute TFR", primary=True)
         self.btn_tfr.clicked.connect(self.compute_tfr_click)
@@ -715,11 +754,16 @@ class MainWindow(QMainWindow):
             return
         tmin = self.spin_tmin.value()
         tmax = self.spin_tmax.value()
+        apply_baseline = self.chk_erp_baseline.isChecked()
 
         # If epochs were already inspected and cleaned, compute ERP locally
         if self.epochs is not None and self.epochs_inspected:
             self.log_status(f"Computing ERP from {len(self.epochs)} inspected epochs...")
             try:
+                # Apply baseline correction if requested
+                if apply_baseline:
+                    self.epochs.apply_baseline((tmin, 0))
+                    self.log_status(f"Applied baseline correction: ({tmin}, 0)")
                 evoked = self.epochs.average()
                 self.log_status(
                     f"ERP Computed from inspected epochs. Averaged {len(self.epochs)} epochs."
@@ -731,7 +775,7 @@ class MainWindow(QMainWindow):
         else:
             # No inspection performed, use worker-based computation
             self.log_status("Computing ERP (no manual inspection performed)...")
-            self.request_compute_erp.emit(event_name, tmin, tmax)
+            self.request_compute_erp.emit(event_name, tmin, tmax, apply_baseline)
 
     def handle_erp_ready(self, evoked):
         """Plots the ERP using the new Interactive Viewer."""
@@ -762,7 +806,9 @@ class MainWindow(QMainWindow):
             return
         l_freq = self.spin_tfr_l.value()
         h_freq = self.spin_tfr_h.value()
-        self.request_compute_tfr.emit(ch, l_freq, h_freq)
+        n_cycles_base = self.spin_tfr_cycles.value()
+        baseline_mode = self.combo_tfr_baseline.currentText()
+        self.request_compute_tfr.emit(ch, l_freq, h_freq, n_cycles_base, baseline_mode)
         self.tabs.setCurrentWidget(self.tab_advanced)
 
     def plot_tfr(self, tfr_power):
@@ -851,7 +897,11 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
 
     def update_plot(self, freqs, psd_mean, filter_info_str):
-        """Updates the Matplotlib canvas with the new PSD data."""
+        """Updates the Matplotlib canvas with the new PSD data.
+
+        PSD is displayed in linear power (μV²/Hz) for better scientific interpretation.
+        MNE returns V²/Hz, so we multiply by 1e12 to convert to μV²/Hz.
+        """
         self.canvas.axes.clear()
 
         # Log filter operation if pending (from launch_pipeline, not ICA)
@@ -874,16 +924,17 @@ class MainWindow(QMainWindow):
             })
             self._pending_ica_excludes = None  # Clear pending
 
-        # PSD Plot Logic
-        # 10*np.log10 to convert to dB
+        # PSD Plot Logic - Linear Power in μV²/Hz
+        # MNE returns V²/Hz, multiply by 1e12 to convert to μV²/Hz
+        psd_uv2 = psd_mean * 1e12
         self.canvas.axes.plot(
-            freqs, 10 * np.log10(psd_mean), color='#007acc', linewidth=1.5
+            freqs, psd_uv2, color='#007acc', linewidth=1.5
         )
 
         title = f"Power Spectral Density (Welch)\n[{filter_info_str}]"
         self.canvas.axes.set_title(title, color='white', pad=20, fontsize=10)
         self.canvas.axes.set_xlabel("Frequency (Hz)", color='white')
-        self.canvas.axes.set_ylabel("Power Spectral Density (dB)", color='white')
+        self.canvas.axes.set_ylabel("Power (μV²/Hz)", color='white')
         self.canvas.axes.tick_params(axis='x', colors='white')
         self.canvas.axes.tick_params(axis='y', colors='white')
         self.canvas.axes.grid(True, linestyle='--', alpha=0.3)

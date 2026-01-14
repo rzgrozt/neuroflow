@@ -215,9 +215,16 @@ class EEGWorker(QObject):
             self.error_occurred.emit(f"ICA Apply Error: {str(e)}")
             traceback.print_exc()
 
-    @pyqtSlot(str, float, float)
-    def compute_erp(self, event_name: str, tmin: float, tmax: float):
-        """Epoch data around event trigger and average to create ERP."""
+    @pyqtSlot(str, float, float, bool)
+    def compute_erp(self, event_name: str, tmin: float, tmax: float, apply_baseline: bool = True):
+        """Epoch data around event trigger and average to create ERP.
+
+        Args:
+            event_name: Name of the event to epoch around.
+            tmin: Start time before event (seconds).
+            tmax: End time after event (seconds).
+            apply_baseline: If True, apply baseline correction from tmin to 0.
+        """
         if self.raw is None:
             self.error_occurred.emit("No data loaded.")
             return
@@ -230,15 +237,22 @@ class EEGWorker(QObject):
             self.error_occurred.emit(f"Event '{event_name}' not found.")
             return
 
-        self.log_message.emit(f"Computing ERP for: {event_name} (tmin={tmin}, tmax={tmax})...")
+        baseline_info = f"baseline=({tmin}, 0)" if apply_baseline else "no baseline"
+        self.log_message.emit(f"Computing ERP for: {event_name} (tmin={tmin}, tmax={tmax}, {baseline_info})...")
 
         try:
             specific_event_id = {event_name: self.event_id[event_name]}
 
+            # Create epochs without baseline initially
             epochs = mne.Epochs(
                 self.raw, self.events, event_id=specific_event_id,
-                tmin=tmin, tmax=tmax, baseline=(tmin, 0), preload=True, verbose=False
+                tmin=tmin, tmax=tmax, baseline=None, preload=True, verbose=False
             )
+
+            # Apply baseline correction if requested
+            if apply_baseline:
+                epochs.apply_baseline((tmin, 0))
+                self.log_message.emit(f"Applied baseline correction: ({tmin}, 0)")
 
             evoked = epochs.average()
 
@@ -250,15 +264,32 @@ class EEGWorker(QObject):
             self.error_occurred.emit(f"ERP Error: {str(e)}")
             traceback.print_exc()
 
-    @pyqtSlot(str, float, float)
-    def compute_tfr(self, ch_name: str, l_freq: float, h_freq: float, n_cycles_div: int = 2):
-        """Compute Time-Frequency Representation using Morlet wavelets."""
+    @pyqtSlot(str, float, float, int, str)
+    def compute_tfr(self, ch_name: str, l_freq: float, h_freq: float,
+                    n_cycles_base: int = 2, baseline_mode: str = 'percent'):
+        """Compute Time-Frequency Representation using Morlet wavelets.
+
+        Args:
+            ch_name: Channel name to analyze.
+            l_freq: Lower frequency bound (Hz).
+            h_freq: Upper frequency bound (Hz).
+            n_cycles_base: Divisor for frequency-adaptive n_cycles (n_cycles = freqs / n_cycles_base).
+                          Higher values = fewer cycles = better temporal resolution.
+                          Lower values = more cycles = better frequency resolution.
+            baseline_mode: Baseline correction mode. Options:
+                          'percent' - Express power as percent change from baseline
+                          'logratio' - Express power as log ratio of baseline
+                          'zscore' - Express power as z-score relative to baseline
+                          'mean' - Subtract mean baseline power
+                          'none' - No baseline correction
+        """
         if self.raw is None:
             self.error_occurred.emit("No data loaded.")
             return
 
         self.log_message.emit(
-            f"Computing TFR for channel {ch_name} (Freqs: {l_freq}-{h_freq}Hz)..."
+            f"Computing TFR for channel {ch_name} (Freqs: {l_freq}-{h_freq}Hz, "
+            f"n_cycles=freqs/{n_cycles_base}, baseline={baseline_mode})..."
         )
 
         try:
@@ -267,7 +298,7 @@ class EEGWorker(QObject):
                 return
 
             freqs = np.arange(l_freq, h_freq + 1, 1.0)
-            n_cycles = freqs / n_cycles_div
+            n_cycles = freqs / n_cycles_base
 
             raw_pick = self.raw.copy().pick([ch_name])
 
@@ -295,6 +326,13 @@ class EEGWorker(QObject):
                 average=True,
                 verbose=False
             )
+
+            # Apply baseline correction if requested
+            if baseline_mode != 'none':
+                # Use first 20% of epoch as baseline (or first 0.4s for 2s epochs)
+                baseline = (None, 0.4)
+                power.apply_baseline(baseline, mode=baseline_mode)
+                self.log_message.emit(f"Applied baseline correction: mode='{baseline_mode}'")
 
             self.tfr_ready.emit(power)
             self.finished.emit()
