@@ -46,62 +46,35 @@ Built with <strong>MNE-Python</strong> for rigorous signal processing and <stron
 
 ## ✦ Core Capabilities
 
-<table>
-<tr>
-<td width="50%" valign="top">
-
 ### 📂 Data Management
 
-| Capability | Description |
-|:-----------|:------------|
-| **Multi-Format I/O** | BrainVision `.vhdr` • MNE `.fif` • EDF `.edf` • Epoched `-epo.fif` |
-| **Smart Montage** | Auto-detects missing locations, applies standard 10-20 |
-| **Dataset Inspector** | Metadata, sampling rate, duration, event statistics |
-| **Sensor Topology** | Interactive 2D electrode visualization |
-| **Session Persistence** | Save complete `.nflow` sessions with full state |
-
-</td>
-<td width="50%" valign="top">
+- **Multi-Format I/O** — BrainVision `.vhdr` • MNE `.fif` • EDF `.edf` • Epoched `-epo.fif`
+- **Smart Montage** — Auto-detects missing locations, applies standard 10-20
+- **Dataset Inspector** — Metadata, sampling rate, duration, event statistics
+- **Sensor Topology** — Interactive 2D electrode visualization
+- **Session Persistence** — Save complete `.nflow` sessions with full state
 
 ### ⚡ Signal Processing
 
-| Capability | Description |
-|:-----------|:------------|
-| **High-Pass Filter** | Remove DC offsets and slow drifts |
-| **Low-Pass Filter** | Eliminate high-frequency noise |
-| **Notch Filter** | Suppress 50/60 Hz power line interference |
-| **Interpolation** | Spherical spline repair for bad channels |
-| **ICA Decomposition** | FastICA artifact removal (EOG, ECG) |
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
+- **High-Pass Filter** — Remove DC offsets and slow drifts
+- **Low-Pass Filter** — Eliminate high-frequency noise
+- **Notch Filter** — Suppress 50/60 Hz power line interference
+- **Interpolation** — Spherical spline repair for bad channels
+- **ICA Decomposition** — FastICA artifact removal (EOG, ECG)
 
 ### 📊 Analysis Suite
 
-| Capability | Description |
-|:-----------|:------------|
-| **Power Spectral Density** | Welch's method with μV²/Hz display |
-| **Event-Related Potentials** | Configurable baseline correction |
-| **Time-Frequency** | Morlet wavelets with multiple normalization modes |
-| **Connectivity** | Weighted Phase Lag Index (wPLI) |
-
-</td>
-<td width="50%" valign="top">
+- **Power Spectral Density** — Welch's method with μV²/Hz display
+- **Event-Related Potentials** — Configurable baseline correction
+- **Time-Frequency** — Morlet wavelets with multiple normalization modes
+- **Connectivity** — Weighted Phase Lag Index (wPLI)
 
 ### 🔬 Quality & Reproducibility
 
-| Capability | Description |
-|:-----------|:------------|
-| **Epoch Inspector** | Interactive artifact rejection |
-| **Pipeline History** | Timestamped preprocessing log |
-| **Screenshot Export** | Capture views for documentation |
-| **HTML Reports** | Professional MNE Report generation |
-
-</td>
-</tr>
-</table>
+- **Epoch Inspector** — Interactive artifact rejection
+- **Pipeline History** — Timestamped preprocessing log
+- **Screenshot Export** — Capture views for documentation
+- **HTML Reports** — Professional MNE Report generation
 
 ---
 
@@ -260,7 +233,7 @@ every contribution helps advance open neuroscience tools.
 
 <div align="center">
 
-## 📜 License
+## 📜 License & Citation
 
 <strong>MIT License</strong>
 
@@ -268,6 +241,21 @@ every contribution helps advance open neuroscience tools.
 *Built with 💙 for the neuroscience community.*
 
 <br/>
+
+If you use NeuroFlow in your research, please consider citing:
+
+</div>
+
+```bibtex
+@software{neuroflow,
+  author       = {Ruzgar Ozturk},
+  title        = {NeuroFlow: Professional EEG Signal Analysis},
+  year         = {2025},
+  url          = {https://github.com/rzgrozt/neuroflow}
+}
+```
+
+<div align="center">
 
 ---
 
