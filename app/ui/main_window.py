@@ -39,6 +39,8 @@ class MainWindow(QMainWindow):
     request_save_epochs = pyqtSignal(str)
     request_interpolate_bads = pyqtSignal(list)
     request_generate_report = pyqtSignal(object, object, object, object, list, dict)
+    request_save_session = pyqtSignal(str, dict)
+    request_load_session = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -58,6 +60,9 @@ class MainWindow(QMainWindow):
         # Current processing info for plot title
         self.current_filter_info = "Raw Signal"
 
+        # Current project file path for save functionality
+        self.current_project_path = None  # Path to current .nflow file
+
         self.thread = QThread()
         self.worker = EEGWorker()
         self.worker.moveToThread(self.thread)
@@ -75,6 +80,7 @@ class MainWindow(QMainWindow):
         self.worker.interpolation_done.connect(self.on_interpolation_done)
         self.worker.report_ready.connect(self.on_report_ready)
         self.worker.data_updated.connect(self.on_data_updated)
+        self.worker.session_loaded.connect(self._restore_session_state)
 
         self.request_load_data.connect(self.worker.load_data)
         self.request_run_pipeline.connect(self.worker.run_pipeline)
@@ -88,6 +94,8 @@ class MainWindow(QMainWindow):
         self.request_save_epochs.connect(self.worker.save_epochs)
         self.request_interpolate_bads.connect(self.worker.interpolate_bads)
         self.request_generate_report.connect(self.worker.generate_report)
+        self.request_save_session.connect(self.worker.save_session)
+        self.request_load_session.connect(self.worker.load_session)
 
         self.thread.start()
 
@@ -100,20 +108,42 @@ class MainWindow(QMainWindow):
 
         file_menu = menu_bar.addMenu("&File")
 
-        save_action = QAction("&Save Clean Data", self)
-        save_action.setShortcut("Ctrl+S")
-        save_action.setStatusTip("Save the processed data to .fif")
+        # Project Session Actions (primary save/open)
+        save_project_action = QAction("💾 &Save Project", self)
+        save_project_action.setShortcut("Ctrl+S")
+        save_project_action.setStatusTip("Save analysis session to .nflow file")
+        save_project_action.triggered.connect(self.on_save_project)
+        file_menu.addAction(save_project_action)
+
+        save_project_as_action = QAction("📁 Save Project &As...", self)
+        save_project_as_action.setShortcut("Ctrl+Shift+S")
+        save_project_as_action.setStatusTip("Save analysis session to a new .nflow file")
+        save_project_as_action.triggered.connect(self.on_save_project_as)
+        file_menu.addAction(save_project_as_action)
+
+        open_project_action = QAction("📂 &Open Project (.nflow)", self)
+        open_project_action.setShortcut("Ctrl+O")
+        open_project_action.setStatusTip("Open a saved analysis session from .nflow file")
+        open_project_action.triggered.connect(self.on_open_project)
+        file_menu.addAction(open_project_action)
+
+        file_menu.addSeparator()
+
+        # Export actions
+        save_action = QAction("Export &Clean Data (.fif)", self)
+        save_action.setStatusTip("Export the processed data to .fif format")
         save_action.triggered.connect(self.on_save_clean_data)
         file_menu.addAction(save_action)
 
-        save_epochs_action = QAction("💾 Save &Epoched Data (.fif)", self)
+        save_epochs_action = QAction("Export &Epoched Data (.fif)", self)
         save_epochs_action.setShortcut("Ctrl+Shift+E")
-        save_epochs_action.setStatusTip("Save the epoched data to .fif")
+        save_epochs_action.setStatusTip("Export the epoched data to .fif format")
         save_epochs_action.triggered.connect(self.save_epochs_click)
         file_menu.addAction(save_epochs_action)
 
-        screenshot_action = QAction("S&creenshot", self)
-        screenshot_action.setShortcut("Ctrl+Shift+S")
+        file_menu.addSeparator()
+
+        screenshot_action = QAction("Scree&nshot", self)
         screenshot_action.setStatusTip("Take a screenshot of the application")
         screenshot_action.triggered.connect(self.on_take_screenshot)
         file_menu.addAction(screenshot_action)
@@ -156,7 +186,8 @@ class MainWindow(QMainWindow):
 
     def save_epochs_click(self):
         """Handle Save Epoched Data menu action."""
-        if self.epochs is None:
+        # Use worker.epochs as the single source of truth
+        if self.worker.epochs is None:
             QMessageBox.warning(
                 self, "No Epochs", "Please create epochs first before saving."
             )
@@ -211,6 +242,247 @@ class MainWindow(QMainWindow):
             )
         else:
             QMessageBox.information(self, "Save Successful", f"Data saved to:\n{filename}")
+
+    def on_save_project(self):
+        """Handle Save Project menu action - save to current file or prompt for new."""
+        if self.worker.raw is None and self.worker.epochs is None:
+            QMessageBox.warning(self, "No Data", "Please load a dataset first before saving a project.")
+            return
+
+        # If we have a current project path, save directly to it
+        if self.current_project_path:
+            state_payload = self._collect_session_state()
+            self.request_save_session.emit(self.current_project_path, state_payload)
+        else:
+            # No current project, use Save As behavior
+            self.on_save_project_as()
+
+    def on_save_project_as(self):
+        """Handle Save Project As menu action - always prompt for new file."""
+        if self.worker.raw is None and self.worker.epochs is None:
+            QMessageBox.warning(self, "No Data", "Please load a dataset first before saving a project.")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Project As",
+            f"{self.source_filename or 'project'}.nflow",
+            "NeuroFlow Project (*.nflow)"
+        )
+
+        if file_path:
+            # Update the current project path
+            self.current_project_path = file_path
+            state_payload = self._collect_session_state()
+            self.request_save_session.emit(file_path, state_payload)
+
+    def on_open_project(self):
+        """Handle Open Project menu action - load session from .nflow file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Project",
+            "",
+            "NeuroFlow Project (*.nflow)"
+        )
+
+        if file_path:
+            # Store the project path for future saves
+            self.current_project_path = file_path
+            self.request_load_session.emit(file_path)
+
+    def _collect_session_state(self) -> dict:
+        """Collect all application state for session persistence.
+
+        Returns:
+            Dictionary containing all state needed to restore the session.
+        """
+        # Gather UI state from input widgets
+        ui_params = {
+            'hp': self.input_hp.text(),
+            'lp': self.input_lp.text(),
+            'notch': self.input_notch.text(),
+            'ica_exclude': self.input_ica_exclude.text(),
+            'event_selected': self.combo_events.currentText(),
+            'event_index': self.combo_events.currentIndex(),
+            'tmin': self.spin_tmin.value(),
+            'tmax': self.spin_tmax.value(),
+            'baseline_checked': self.chk_erp_baseline.isChecked(),
+            'tfr_channel': self.combo_channels.currentText(),
+            'tfr_channel_index': self.combo_channels.currentIndex(),
+            'tfr_freq_low': self.spin_tfr_l.value(),
+            'tfr_freq_high': self.spin_tfr_h.value(),
+            'tfr_cycles': self.spin_tfr_cycles.value(),
+            'tfr_baseline_mode': self.combo_tfr_baseline.currentText(),
+            'tfr_baseline_index': self.combo_tfr_baseline.currentIndex(),
+        }
+
+        # Build the complete state payload
+        state_payload = {
+            # Backend MNE objects
+            'raw': self.worker.raw,
+            'raw_original': self.worker.raw_original,
+            'ica': self.worker.ica,
+            'epochs': self.worker.epochs,  # Created epochs (single source of truth)
+            'epochs_data': self.epochs_data,  # Loaded epoch files (-epo.fif)
+            'events': self.worker.events,
+            'event_id': self.worker.event_id,
+            # Metadata
+            'pipeline_history': self.pipeline_history,
+            'source_filename': self.source_filename,
+            'current_filter_info': self.current_filter_info,
+            'epochs_inspected': self.epochs_inspected,
+            # UI state
+            'ui_params': ui_params,
+            # Event dropdown items for restoration
+            'event_items': [self.combo_events.itemText(i) for i in range(self.combo_events.count())],
+            # Channel dropdown items for restoration
+            'channel_items': [self.combo_channels.itemText(i) for i in range(self.combo_channels.count())],
+        }
+
+        return state_payload
+
+    def _restore_session_state(self, state: dict):
+        """Restore application state from a loaded session.
+
+        Args:
+            state: Dictionary containing the saved session state.
+        """
+        # Store pipeline history BEFORE calling on_data_loaded (which resets it)
+        saved_pipeline_history = state.get('pipeline_history', [])
+        saved_source_filename = state.get('source_filename')
+        saved_filter_info = state.get('current_filter_info', 'Raw Signal')
+        saved_epochs_inspected = state.get('epochs_inspected', False)
+
+        # Restore UI state first (before on_data_loaded overwrites dropdowns)
+        ui_params = state.get('ui_params', {})
+
+        # Restore filter parameters
+        if 'hp' in ui_params:
+            self.input_hp.setText(ui_params['hp'])
+        if 'lp' in ui_params:
+            self.input_lp.setText(ui_params['lp'])
+        if 'notch' in ui_params:
+            self.input_notch.setText(ui_params['notch'])
+        if 'ica_exclude' in ui_params:
+            self.input_ica_exclude.setText(ui_params['ica_exclude'])
+
+        # Restore epoch parameters
+        if 'tmin' in ui_params:
+            self.spin_tmin.setValue(ui_params['tmin'])
+        if 'tmax' in ui_params:
+            self.spin_tmax.setValue(ui_params['tmax'])
+        if 'baseline_checked' in ui_params:
+            self.chk_erp_baseline.setChecked(ui_params['baseline_checked'])
+
+        # Restore TFR parameters
+        if 'tfr_freq_low' in ui_params:
+            self.spin_tfr_l.setValue(ui_params['tfr_freq_low'])
+        if 'tfr_freq_high' in ui_params:
+            self.spin_tfr_h.setValue(ui_params['tfr_freq_high'])
+        if 'tfr_cycles' in ui_params:
+            self.spin_tfr_cycles.setValue(ui_params['tfr_cycles'])
+
+        # Determine what data we have
+        raw_data = state.get('raw')
+        epochs_data = state.get('epochs')
+        
+        # Restore local references
+        self.raw_data = raw_data
+        self.raw_original = state.get('raw_original')
+        
+        # Sync epochs: set both self.epochs and epochs_data for consistency
+        self.epochs = epochs_data
+        self.epochs_data = state.get('epochs_data')  # For loaded -epo.fif files
+
+        # Call on_data_loaded WITHOUT showing message box (we'll show our own)
+        # We need to manually do what on_data_loaded does but skip the message
+        if raw_data is not None:
+            self._restore_ui_for_data(raw_data, is_epochs=False)
+        elif epochs_data is not None:
+            self._restore_ui_for_data(epochs_data, is_epochs=True)
+        elif self.epochs_data is not None:
+            self._restore_ui_for_data(self.epochs_data, is_epochs=True)
+
+        # Restore dropdowns AFTER _restore_ui_for_data (which clears them)
+        event_items = state.get('event_items', [])
+        self.combo_events.clear()
+        self.combo_events.addItems(event_items)
+        if 'event_index' in ui_params and ui_params['event_index'] >= 0:
+            self.combo_events.setCurrentIndex(ui_params['event_index'])
+
+        channel_items = state.get('channel_items', [])
+        self.combo_channels.clear()
+        self.combo_channels.addItems(channel_items)
+        if 'tfr_channel_index' in ui_params and ui_params['tfr_channel_index'] >= 0:
+            self.combo_channels.setCurrentIndex(ui_params['tfr_channel_index'])
+
+        # Restore TFR baseline mode
+        if 'tfr_baseline_index' in ui_params:
+            self.combo_tfr_baseline.setCurrentIndex(ui_params['tfr_baseline_index'])
+
+        # RESTORE saved state that on_data_loaded would have overwritten
+        self.pipeline_history = saved_pipeline_history
+        self.source_filename = saved_source_filename
+        self.current_filter_info = saved_filter_info
+        self.epochs_inspected = saved_epochs_inspected
+
+        # Enable epoch-related buttons if epochs exist
+        if self.worker.epochs is not None:
+            self.btn_inspect_epochs.setEnabled(True)
+            self.btn_erp.setEnabled(True)
+            self.btn_create_epochs.setEnabled(True)
+
+        # Update plot
+        self.update_time_series_plot()
+
+        # Show single success message
+        from pathlib import Path
+        project_name = Path(self.current_project_path).stem if self.current_project_path else saved_source_filename
+        QMessageBox.information(
+            self,
+            "Project Loaded",
+            f"Project '{project_name or 'Unknown'}' loaded successfully.\n"
+            f"Pipeline history: {len(self.pipeline_history)} steps restored."
+        )
+
+    def _restore_ui_for_data(self, data, is_epochs: bool):
+        """Restore UI state for loaded data without showing message boxes.
+        
+        This is a helper for _restore_session_state that does what on_data_loaded
+        does but without resetting pipeline_history or showing dialogs.
+        
+        Args:
+            data: The MNE Raw or Epochs object.
+            is_epochs: True if data is Epochs, False if Raw.
+        """
+        if is_epochs:
+            self.epochs_data = data
+            self.raw_data = None
+            self.raw_original = None
+        else:
+            self.raw_data = data
+            self.raw_original = self.worker.raw_original
+            self.epochs_data = None
+
+        # Enable buttons based on data type
+        self.btn_run.setEnabled(True)
+        self.btn_sensors.setEnabled(True)
+        self.btn_dataset_info.setEnabled(True)
+        self.btn_calc_ica.setEnabled(not is_epochs)
+        self.btn_apply_ica.setEnabled(not is_epochs)
+        self.btn_channel_manager.setEnabled(True)
+        self.btn_tfr.setEnabled(True)
+        self.btn_conn.setEnabled(True)
+
+        # Initialize navigation controls
+        if is_epochs:
+            self.total_duration = data.times[-1] - data.times[0]
+        else:
+            self.total_duration = data.times[-1]
+        self.current_start_time = 0.0
+
+        if hasattr(self, 'nav_bar'):
+            self.nav_bar.set_duration_range(self.total_duration)
 
     def init_ui(self) -> None:
         """Initialize the user interface by delegating to helper methods."""
@@ -599,6 +871,12 @@ class MainWindow(QMainWindow):
             self.epochs_data = data
             self.raw_data = None
             self.raw_original = None
+            # Also set worker.epochs so analysis functions can use it
+            self.worker.epochs = data
+            # Enable epoch-related buttons immediately for loaded epochs
+            self.btn_inspect_epochs.setEnabled(True)
+            self.btn_erp.setEnabled(True)
+            self.btn_create_epochs.setEnabled(True)  # Can still "use" epochs
         else:
             self.raw_data = data  # Store reference
             self.raw_original = self.worker.raw_original  # Store original for overlay comparison
@@ -751,7 +1029,38 @@ class MainWindow(QMainWindow):
         self.log_status(f"Populated event dropdown with {len(event_id_dict)} events.")
 
     def create_epochs_click(self):
-        """Create epochs from continuous data using selected event trigger."""
+        """Create epochs from continuous data using selected event trigger.
+        
+        If epoched data is already loaded (from -epo.fif file), use that directly
+        instead of trying to create new epochs from raw data.
+        """
+        # Check if we already have loaded epochs (from -epo.fif file)
+        if self.epochs_data is not None or self.worker.epochs is not None:
+            # Epochs already exist - use them directly
+            if self.worker.epochs is None and self.epochs_data is not None:
+                # Transfer loaded epochs to worker
+                self.worker.epochs = self.epochs_data
+            
+            self.log_status("Using pre-loaded epochs from file.")
+            self.btn_inspect_epochs.setEnabled(True)
+            self.btn_erp.setEnabled(True)
+            self.btn_tfr.setEnabled(True)
+            self.btn_conn.setEnabled(True)
+            self.epochs_inspected = False
+            QMessageBox.information(
+                self, "Epochs Ready", 
+                f"Using {len(self.worker.epochs)} pre-loaded epochs.\n"
+                "You can now inspect epochs or compute ERP/TFR."
+            )
+            return
+
+        # No pre-loaded epochs - need to create from raw data
+        if self.worker.raw is None:
+            self.show_error("No raw data loaded. Cannot create epochs.\n\n"
+                          "If you loaded an epoched file, epochs are already available.\n"
+                          "Use 'Inspect Epochs' or 'Compute ERP' directly.")
+            return
+
         event_name = self.combo_events.currentText()
         if not event_name:
             self.show_error("Please select an event trigger first.")

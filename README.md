@@ -19,6 +19,7 @@
 | **Dataset Inspector** | View recording metadata, sampling rate, duration, and event statistics |
 | **Sensor Visualization** | Interactive 2D topographic display of electrode positions |
 | **Data Export** | Save processed data and epochs to `.fif` format for future analysis |
+| **Project Sessions** | Save/load complete analysis sessions (`.nflow`) including data, ICA, epochs, UI state, and pipeline history |
 
 ### Signal Processing
 

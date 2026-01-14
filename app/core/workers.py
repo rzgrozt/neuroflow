@@ -2,6 +2,7 @@
 
 import os
 import logging
+import pickle
 
 import mne
 import numpy as np
@@ -34,6 +35,7 @@ class EEGWorker(QObject):
     interpolation_done = pyqtSignal(list)  # Emits list of interpolated channels
     report_ready = pyqtSignal(str)  # Emits file path of generated report
     data_updated = pyqtSignal(object, str)  # Emits (raw, info_str) after any pipeline operation
+    session_loaded = pyqtSignal(dict)  # Emits loaded session state dictionary
 
     def __init__(self):
         super().__init__()
@@ -760,3 +762,83 @@ class EEGWorker(QObject):
         ])
 
         return "\n".join(html_parts)
+
+    @pyqtSlot(str, dict)
+    def save_session(self, file_path: str, state_payload: dict) -> None:
+        """Save the entire session state to a .nflow file using pickle.
+
+        Args:
+            file_path: Path to save the session file (should end with .nflow).
+            state_payload: Dictionary containing all application state to persist.
+        """
+        self.log_message.emit(f"Saving session to {file_path}...")
+
+        try:
+            # Ensure proper extension
+            if not file_path.endswith('.nflow'):
+                file_path += '.nflow'
+
+            # Ensure MNE objects are preloaded before pickling
+            if state_payload.get('raw') is not None:
+                if hasattr(state_payload['raw'], 'preload') and not state_payload['raw'].preload:
+                    state_payload['raw'].load_data()
+            if state_payload.get('raw_original') is not None:
+                if hasattr(state_payload['raw_original'], 'preload') and not state_payload['raw_original'].preload:
+                    state_payload['raw_original'].load_data()
+            if state_payload.get('epochs') is not None:
+                if hasattr(state_payload['epochs'], 'preload') and not state_payload['epochs'].preload:
+                    state_payload['epochs'].load_data()
+
+            with open(file_path, 'wb') as f:
+                pickle.dump(state_payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+            self.save_finished.emit(file_path)
+            self.log_message.emit(f"Session saved successfully to {file_path}")
+
+        except PermissionError:
+            self.error_occurred.emit(f"Permission denied: Cannot write to {file_path}")
+            logger.exception("Session save failed - permission denied")
+        except OSError as e:
+            if "No space left" in str(e) or e.errno == 28:
+                self.error_occurred.emit("Disk full: Not enough space to save session.")
+            else:
+                self.error_occurred.emit(f"Save Error: {str(e)}")
+            logger.exception("Session save failed - OS error")
+        except Exception as e:
+            self.error_occurred.emit(f"Session Save Error: {str(e)}")
+            logger.exception("Session save failed")
+
+    @pyqtSlot(str)
+    def load_session(self, file_path: str) -> None:
+        """Load a session state from a .nflow file.
+
+        Args:
+            file_path: Path to the .nflow session file.
+        """
+        self.log_message.emit(f"Loading session from {file_path}...")
+
+        try:
+            if not os.path.exists(file_path):
+                self.error_occurred.emit(f"File not found: {file_path}")
+                return
+
+            with open(file_path, 'rb') as f:
+                state_payload = pickle.load(f)
+
+            # Restore worker state from payload
+            self.raw = state_payload.get('raw')
+            self.raw_original = state_payload.get('raw_original')
+            self.ica = state_payload.get('ica')
+            self.epochs = state_payload.get('epochs')
+            self.events = state_payload.get('events')
+            self.event_id = state_payload.get('event_id')
+
+            self.log_message.emit(f"Session loaded successfully from {file_path}")
+            self.session_loaded.emit(state_payload)
+
+        except pickle.UnpicklingError as e:
+            self.error_occurred.emit(f"Invalid session file format: {str(e)}")
+            logger.exception("Session load failed - unpickling error")
+        except Exception as e:
+            self.error_occurred.emit(f"Session Load Error: {str(e)}")
+            logger.exception("Session load failed")
