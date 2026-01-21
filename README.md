@@ -76,6 +76,14 @@ Built with <strong>MNE-Python</strong> for rigorous signal processing and <stron
 - **Screenshot Export** — Capture views for documentation
 - **HTML Reports** — Professional MNE Report generation
 
+### ⚡ Batch Processing
+
+- **Multi-File Automation** — Process entire folders of EEG files automatically
+- **Smart Auto-ICA** — Intelligent EOG detection with Fp1/Fp2 fallback for blink removal
+- **Configurable Pipeline** — Toggle filtering, ICA, epoching, and report generation
+- **Progress Tracking** — Real-time progress dialog with per-file status logging
+- **Batch Reports** — Generate individual HTML reports for each processed file
+
 ---
 
 <div align="center">
