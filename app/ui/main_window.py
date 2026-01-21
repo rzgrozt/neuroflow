@@ -5,14 +5,16 @@ import traceback
 import mne
 import numpy as np
 
+import os
+
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QFileDialog, QFrame, QMessageBox,
+    QFileDialog, QFrame, QMessageBox, QProgressDialog,
     QTabWidget, QApplication, QSplitter,
     QScrollArea, QSizePolicy, QLabel, QSpinBox
 )
 from PyQt6.QtGui import QAction, QIcon
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QMetaObject, Q_ARG
 
 from app.core.workers import EEGWorker
 from .canvas import MplCanvas
@@ -81,6 +83,12 @@ class MainWindow(QMainWindow):
         self.worker.report_ready.connect(self.on_report_ready)
         self.worker.data_updated.connect(self.on_data_updated)
         self.worker.session_loaded.connect(self._restore_session_state)
+
+        # Batch processing signals
+        self.worker.batch_progress.connect(self._on_batch_progress)
+        self.worker.batch_log.connect(self._on_batch_log)
+        self.worker.batch_finished.connect(self._on_batch_finished)
+        self.worker.batch_error.connect(self._on_batch_error)
 
         self.request_load_data.connect(self.worker.load_data)
         self.request_run_pipeline.connect(self.worker.run_pipeline)
@@ -519,7 +527,7 @@ class MainWindow(QMainWindow):
         self._main_layout.addWidget(self._splitter)
 
     def _setup_sidebar(self) -> None:
-        """Set up the sidebar with all sections: Data, ICA, Epochs, ERP, Advanced."""
+        """Set up the sidebar with all sections: Data, ICA, Epochs, ERP, Advanced, Batch."""
         # Sidebar container
         sidebar_widget = QWidget()
         sidebar_widget.setFixedWidth(330)
@@ -553,6 +561,7 @@ class MainWindow(QMainWindow):
         self._create_epochs_section(scroll_layout)
         self._create_erp_section(scroll_layout)
         self._create_advanced_section(scroll_layout)
+        self._create_batch_section(scroll_layout)
 
         # Set scroll content and add to sidebar
         scroll_area.setWidget(scroll_content)
@@ -754,6 +763,81 @@ class MainWindow(QMainWindow):
         parent_layout.addWidget(section_advanced)
         self._section_advanced = section_advanced
 
+
+    def _create_batch_section(self, parent_layout: QVBoxLayout) -> None:
+        """Create the Batch Processing section."""
+        section_batch = CollapsibleBox("Batch Processing", "⚡", expanded=False)
+
+        # Batch Folders Card
+        card_folders = SectionCard("Folders", "📁")
+
+        # Input folder selection
+        self.batch_input_folder = ""
+        self.btn_batch_input = ActionButton("Select Input Folder")
+        self.btn_batch_input.setToolTip("Select folder containing EEG files (.vhdr, .fif, .edf)")
+        card_folders.addWidget(self.btn_batch_input)
+
+        self.lbl_batch_input = QLabel("No folder selected")
+        self.lbl_batch_input.setStyleSheet("""
+            QLabel {
+                color: #5c6070;
+                font-size: 10px;
+                font-style: italic;
+                padding: 2px 4px;
+            }
+        """)
+        self.lbl_batch_input.setWordWrap(True)
+        card_folders.addWidget(self.lbl_batch_input)
+
+        # Output folder selection
+        self.batch_output_folder = ""
+        self.btn_batch_output = ActionButton("Select Output Folder")
+        self.btn_batch_output.setToolTip("Select folder for saving processed files and reports")
+        card_folders.addWidget(self.btn_batch_output)
+
+        self.lbl_batch_output = QLabel("No folder selected")
+        self.lbl_batch_output.setStyleSheet("""
+            QLabel {
+                color: #5c6070;
+                font-size: 10px;
+                font-style: italic;
+                padding: 2px 4px;
+            }
+        """)
+        self.lbl_batch_output.setWordWrap(True)
+        card_folders.addWidget(self.lbl_batch_output)
+
+        section_batch.addWidget(card_folders)
+
+        # Batch Options Card
+        card_options = SectionCard("Pipeline Options", "⚙️")
+
+        self.chk_batch_filter = ParamCheckRow("Enable Filtering", checked=True)
+        card_options.addWidget(self.chk_batch_filter)
+
+        self.chk_batch_ica = ParamCheckRow("Enable Auto-ICA (Remove Blinks)", checked=True)
+        card_options.addWidget(self.chk_batch_ica)
+
+        self.chk_batch_epoch = ParamCheckRow("Enable Epoching", checked=True)
+        card_options.addWidget(self.chk_batch_epoch)
+
+        self.chk_batch_report = ParamCheckRow("Generate Reports", checked=True)
+        card_options.addWidget(self.chk_batch_report)
+
+        section_batch.addWidget(card_options)
+
+        # Start Button Card
+        card_start = SectionCard()
+        self.btn_start_batch = ActionButton("🚀 Start Batch Processing", primary=True)
+        self.btn_start_batch.setEnabled(False)
+        self.btn_start_batch.setToolTip("Process all EEG files in the input folder")
+        card_start.addWidget(self.btn_start_batch)
+
+        section_batch.addWidget(card_start)
+
+        parent_layout.addWidget(section_batch)
+        self._section_batch = section_batch
+
     def _setup_content_area(self) -> None:
         """Set up the main content area with tabs, navigation bar, and canvas."""
         # Main Content
@@ -808,7 +892,7 @@ class MainWindow(QMainWindow):
         # Accordion behavior for sections
         self.sidebar_sections = [
             self._section_data, self._section_ica, self._section_epochs,
-            self._section_erp, self._section_advanced
+            self._section_erp, self._section_advanced, self._section_batch
         ]
         for section in self.sidebar_sections:
             section.expanded.connect(self._on_section_expanded)
@@ -840,6 +924,11 @@ class MainWindow(QMainWindow):
         self.nav_bar.duration_changed.connect(self._on_nav_duration_changed)
         self.nav_bar.scale_changed.connect(self._on_nav_scale_changed)
         self.nav_bar.overlay_toggled.connect(self._on_nav_overlay_toggled)
+
+        # Batch processing signals
+        self.btn_batch_input.clicked.connect(self._on_select_batch_input)
+        self.btn_batch_output.clicked.connect(self._on_select_batch_output)
+        self.btn_start_batch.clicked.connect(self._on_start_batch_click)
 
     def _on_section_expanded(self, expanded_section):
         """Collapse all sections except the one being expanded (accordion behavior)."""
@@ -1610,3 +1699,139 @@ class MainWindow(QMainWindow):
         self.thread.quit()
         self.thread.wait()
         event.accept()
+
+
+    # ==================== Batch Processing Methods ====================
+
+    def _on_select_batch_input(self) -> None:
+        """Handle input folder selection for batch processing."""
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Input Folder", "",
+            QFileDialog.Option.ShowDirsOnly
+        )
+        if folder:
+            self.batch_input_folder = folder
+            # Show truncated path if too long
+            display_path = folder if len(folder) < 40 else f"...{folder[-37:]}"
+            self.lbl_batch_input.setText(display_path)
+            self.lbl_batch_input.setToolTip(folder)
+            self._update_batch_button_state()
+            self.log_status(f"Batch input folder: {folder}")
+
+    def _on_select_batch_output(self) -> None:
+        """Handle output folder selection for batch processing."""
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Output Folder", "",
+            QFileDialog.Option.ShowDirsOnly
+        )
+        if folder:
+            self.batch_output_folder = folder
+            # Show truncated path if too long
+            display_path = folder if len(folder) < 40 else f"...{folder[-37:]}"
+            self.lbl_batch_output.setText(display_path)
+            self.lbl_batch_output.setToolTip(folder)
+            self._update_batch_button_state()
+            self.log_status(f"Batch output folder: {folder}")
+
+    def _update_batch_button_state(self) -> None:
+        """Enable/disable start batch button based on folder selection."""
+        enabled = bool(self.batch_input_folder and self.batch_output_folder)
+        self.btn_start_batch.setEnabled(enabled)
+
+    def _on_start_batch_click(self) -> None:
+        """Start batch processing with current parameters."""
+        if not self.batch_input_folder or not self.batch_output_folder:
+            self.show_error("Please select both input and output folders.")
+            return
+
+        # Validate folders exist
+        if not os.path.isdir(self.batch_input_folder):
+            self.show_error(f"Input folder does not exist: {self.batch_input_folder}")
+            return
+        if not os.path.isdir(self.batch_output_folder):
+            self.show_error(f"Output folder does not exist: {self.batch_output_folder}")
+            return
+
+        # Collect parameters from UI
+        params = {
+            'filter': self.chk_batch_filter.isChecked(),
+            'l_freq': float(self.input_hp.text() or 1.0),
+            'h_freq': float(self.input_lp.text() or 40.0),
+            'notch_freq': float(self.input_notch.text() or 0.0),
+            'ica': self.chk_batch_ica.isChecked(),
+            'epoch': self.chk_batch_epoch.isChecked(),
+            'event_id': self.combo_events.currentText() if self.combo_events.count() > 0 else "All Events",
+            'tmin': self.spin_tmin.value(),
+            'tmax': self.spin_tmax.value(),
+            'baseline': self.chk_erp_baseline.isChecked(),
+            'report': self.chk_batch_report.isChecked(),
+        }
+
+        self.log_status("Starting batch processing...")
+
+        # Create and show progress dialog
+        self.batch_progress_dialog = QProgressDialog(
+            "Initializing batch processing...",
+            "Cancel",
+            0, 100,
+            self
+        )
+        self.batch_progress_dialog.setWindowTitle("Batch Processing")
+        self.batch_progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.batch_progress_dialog.setMinimumDuration(0)
+        self.batch_progress_dialog.setValue(0)
+        self.batch_progress_dialog.canceled.connect(self._on_batch_canceled)
+        self.batch_progress_dialog.show()
+
+        # Disable batch controls during processing
+        self.btn_start_batch.setEnabled(False)
+        self.btn_batch_input.setEnabled(False)
+        self.btn_batch_output.setEnabled(False)
+
+        # Start batch processing
+        QMetaObject.invokeMethod(
+            self.worker, "run_batch_job",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, self.batch_input_folder),
+            Q_ARG(str, self.batch_output_folder),
+            Q_ARG(dict, params)
+        )
+
+    def _on_batch_progress(self, current: int, total: int, filename: str) -> None:
+        """Update batch progress dialog."""
+        if hasattr(self, 'batch_progress_dialog') and self.batch_progress_dialog:
+            progress = int((current / total) * 100)
+            self.batch_progress_dialog.setValue(progress)
+            self.batch_progress_dialog.setLabelText(
+                f"Processing file {current}/{total}:\n{filename}"
+            )
+
+    def _on_batch_log(self, message: str) -> None:
+        """Handle batch log messages."""
+        self.log_status(message)
+
+    def _on_batch_finished(self, summary: str) -> None:
+        """Handle batch processing completion."""
+        if hasattr(self, 'batch_progress_dialog') and self.batch_progress_dialog:
+            self.batch_progress_dialog.close()
+            self.batch_progress_dialog = None
+
+        # Re-enable batch controls
+        self.btn_start_batch.setEnabled(True)
+        self.btn_batch_input.setEnabled(True)
+        self.btn_batch_output.setEnabled(True)
+
+        self.log_status(summary)
+        QMessageBox.information(self, "Batch Processing Complete", summary)
+
+    def _on_batch_error(self, filename: str, error: str) -> None:
+        """Handle per-file batch errors."""
+        self.log_status(f"Error processing {filename}: {error}")
+
+    def _on_batch_canceled(self) -> None:
+        """Handle batch cancellation."""
+        self.log_status("Batch processing was canceled by user.")
+        # Re-enable batch controls
+        self.btn_start_batch.setEnabled(True)
+        self.btn_batch_input.setEnabled(True)
+        self.btn_batch_output.setEnabled(True)

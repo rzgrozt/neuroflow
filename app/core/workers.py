@@ -37,6 +37,12 @@ class EEGWorker(QObject):
     data_updated = pyqtSignal(object, str)  # Emits (raw, info_str) after any pipeline operation
     session_loaded = pyqtSignal(dict)  # Emits loaded session state dictionary
 
+    # Batch processing signals
+    batch_progress = pyqtSignal(int, int, str)  # (current_index, total_files, current_filename)
+    batch_log = pyqtSignal(str)  # Dedicated log signal for batch details
+    batch_finished = pyqtSignal(str)  # Emits summary message when batch completes
+    batch_error = pyqtSignal(str, str)  # (filename, error_message) for per-file errors
+
     def __init__(self):
         super().__init__()
         self.raw = None  # Holds the MNE Raw object (working copy)
@@ -842,3 +848,281 @@ class EEGWorker(QObject):
         except Exception as e:
             self.error_occurred.emit(f"Session Load Error: {str(e)}")
             logger.exception("Session load failed")
+
+
+    @pyqtSlot(str, str, dict)
+    def run_batch_job(self, input_folder: str, output_folder: str, params: dict) -> None:
+        """Run batch processing pipeline on all EEG files in a folder.
+
+        Args:
+            input_folder: Path to folder containing EEG files.
+            output_folder: Path to folder for saving processed data and reports.
+            params: Dictionary containing processing parameters:
+                - filter: bool - Whether to apply filtering
+                - l_freq: float - High-pass filter frequency
+                - h_freq: float - Low-pass filter frequency
+                - notch_freq: float - Notch filter frequency
+                - ica: bool - Whether to apply auto-ICA
+                - epoch: bool - Whether to create epochs
+                - event_id: str - Event name for epoching
+                - tmin: float - Epoch start time
+                - tmax: float - Epoch end time
+                - baseline: bool - Whether to apply baseline correction
+                - report: bool - Whether to generate HTML reports
+        """
+        self.batch_log.emit(f"Starting batch processing...")
+        self.batch_log.emit(f"Input folder: {input_folder}")
+        self.batch_log.emit(f"Output folder: {output_folder}")
+
+        # Scan for EEG files
+        supported_extensions = ('.vhdr', '.fif', '.edf')
+        eeg_files = []
+        for filename in os.listdir(input_folder):
+            if filename.lower().endswith(supported_extensions):
+                # Skip epoch files for batch processing
+                if '-epo.fif' in filename or '_epo.fif' in filename:
+                    continue
+                eeg_files.append(os.path.join(input_folder, filename))
+
+        if not eeg_files:
+            self.batch_error.emit("", "No EEG files found in the input folder.")
+            self.batch_finished.emit("Batch processing failed: No files found.")
+            return
+
+        eeg_files.sort()
+        total_files = len(eeg_files)
+        self.batch_log.emit(f"Found {total_files} EEG file(s) to process.")
+
+        successful = 0
+        failed = 0
+        failed_files = []
+
+        for idx, file_path in enumerate(eeg_files):
+            filename = os.path.basename(file_path)
+            base_name = os.path.splitext(filename)[0]
+            
+            # Handle .vhdr files (remove extension properly)
+            if filename.endswith('.vhdr'):
+                base_name = filename[:-5]
+
+            self.batch_progress.emit(idx + 1, total_files, filename)
+            self.batch_log.emit(f"\n{'='*50}")
+            self.batch_log.emit(f"Processing [{idx + 1}/{total_files}]: {filename}")
+
+            try:
+                # Step 1: Load data
+                self.batch_log.emit("  → Loading data...")
+                raw = self._read_file(file_path)
+                
+                if raw is None:
+                    self.batch_log.emit("  ⚠ Skipping epoched file.")
+                    continue
+
+                self._set_channel_types(raw)
+                self._set_montage(raw)
+
+                # Step 2: Apply filtering
+                if params.get('filter', True):
+                    l_freq = params.get('l_freq', 1.0)
+                    h_freq = params.get('h_freq', 40.0)
+                    notch_freq = params.get('notch_freq', 0.0)
+
+                    self.batch_log.emit(f"  → Filtering (HP={l_freq}Hz, LP={h_freq}Hz)...")
+                    
+                    lf = l_freq if l_freq > 0 else None
+                    hf = h_freq if h_freq > 0 else None
+                    
+                    if lf or hf:
+                        raw.filter(l_freq=lf, h_freq=hf, fir_design='firwin', verbose=False)
+                    
+                    if notch_freq > 0:
+                        self.batch_log.emit(f"  → Applying notch filter at {notch_freq}Hz...")
+                        raw.notch_filter(freqs=np.array([notch_freq]), fir_design='firwin', verbose=False)
+
+                # Step 3: Auto-ICA for artifact removal
+                ica = None
+                if params.get('ica', True):
+                    self.batch_log.emit("  → Running Auto-ICA...")
+
+                    try:
+                        # Initialize ICA
+                        ica = mne.preprocessing.ICA(
+                            n_components=15, method='fastica', random_state=97, max_iter='auto'
+                        )
+
+                        # Filter for ICA fitting (1Hz high-pass recommended for ICA)
+                        raw_for_ica = raw.copy()
+                        raw_for_ica.filter(l_freq=1.0, h_freq=None, verbose=False)
+
+                        # Fit ICA
+                        self.batch_log.emit("  → Fitting ICA components...")
+                        ica.fit(raw_for_ica, verbose=False)
+                        self.batch_log.emit(f"  → ICA fitted with {ica.n_components_} components.")
+
+                        # Smart EOG Channel Selection
+                        eog_channel = None
+                        eog_indices = []
+
+                        # Option 1: Check for explicit EOG channel types
+                        eog_channels = [ch for ch in raw.ch_names
+                                       if raw.get_channel_types([ch])[0] == 'eog']
+
+                        if eog_channels:
+                            eog_channel = eog_channels[0]
+                            self.batch_log.emit(f"  → Using EOG channel: {eog_channel}")
+                        else:
+                            # Option 2: Check for channels with 'eog' in name
+                            eog_name_channels = [ch for ch in raw.ch_names
+                                                if 'eog' in ch.lower() or 'veog' in ch.lower() or 'heog' in ch.lower()]
+
+                            if eog_name_channels:
+                                eog_channel = eog_name_channels[0]
+                                self.batch_log.emit(f"  → Using EOG-named channel: {eog_channel}")
+                            else:
+                                # Option 3: Fallback to frontal channels (Fp1, Fp2) as surrogate EOG
+                                frontal_surrogates = ['Fp1', 'Fp2', 'FP1', 'FP2', 'Fpz', 'FPz']
+                                available_frontals = [ch for ch in frontal_surrogates if ch in raw.ch_names]
+
+                                if available_frontals:
+                                    eog_channel = available_frontals[0]
+                                    self.batch_log.emit(f"  → Using frontal channel as EOG surrogate: {eog_channel}")
+                                else:
+                                    self.batch_log.emit("  → No EOG or frontal channels found for artifact detection.")
+
+                        # Detect EOG artifacts using find_bads_eog
+                        if eog_channel:
+                            try:
+                                eog_indices, eog_scores = ica.find_bads_eog(
+                                    raw, ch_name=eog_channel, verbose=False
+                                )
+                                self.batch_log.emit(f"  → EOG correlation scores: {[f'{s:.2f}' for s in eog_scores[:5]]}")
+                            except Exception as e:
+                                self.batch_log.emit(f"  ⚠ EOG detection with {eog_channel} failed: {str(e)}")
+                                # Try without specifying channel as last resort
+                                try:
+                                    eog_indices, eog_scores = ica.find_bads_eog(raw, verbose=False)
+                                except Exception:
+                                    eog_indices = []
+                        else:
+                            # Try automatic detection without specific channel
+                            try:
+                                eog_indices, eog_scores = ica.find_bads_eog(raw, verbose=False)
+                            except Exception:
+                                eog_indices = []
+
+                        # Apply ICA cleaning
+                        if eog_indices:
+                            ica.exclude = list(eog_indices)
+                            self.batch_log.emit(f"  → Auto-ICA: Removing components {list(eog_indices)}")
+                            ica.apply(raw)
+                            self.batch_log.emit("  ✓ ICA artifact removal applied.")
+                        else:
+                            self.batch_log.emit("  → No EOG artifacts detected automatically.")
+
+                    except Exception as e:
+                        self.batch_log.emit(f"  ⚠ ICA failed: {str(e)}")
+                        ica = None  # Reset ICA on failure
+
+                # Step 4: Create epochs if requested
+                epochs = None
+                evoked = None
+                if params.get('epoch', True):
+                    try:
+                        events, event_id = mne.events_from_annotations(raw, verbose=False)
+                        
+                        if len(events) > 0:
+                            event_name = params.get('event_id', 'All Events')
+                            tmin = params.get('tmin', -0.2)
+                            tmax = params.get('tmax', 0.8)
+                            apply_baseline = params.get('baseline', True)
+                            
+                            self.batch_log.emit(f"  → Creating epochs (tmin={tmin}, tmax={tmax})...")
+                            
+                            # Determine event_id for epoching
+                            if event_name == "All Events":
+                                specific_event_id = event_id
+                            elif event_name in event_id:
+                                specific_event_id = {event_name: event_id[event_name]}
+                            else:
+                                specific_event_id = event_id
+                            
+                            epochs = mne.Epochs(
+                                raw, events, event_id=specific_event_id,
+                                tmin=tmin, tmax=tmax, baseline=None,
+                                preload=True, verbose=False
+                            )
+                            
+                            if apply_baseline:
+                                epochs.apply_baseline((tmin, 0))
+                            
+                            self.batch_log.emit(f"  → Created {len(epochs)} epochs.")
+                            
+                            # Compute ERP for report
+                            evoked = epochs.average()
+                        else:
+                            self.batch_log.emit("  ⚠ No events found, skipping epoching.")
+                            
+                    except Exception as e:
+                        self.batch_log.emit(f"  ⚠ Epoching failed: {str(e)}")
+
+                # Step 5: Save processed data
+                self.batch_log.emit("  → Saving processed data...")
+                
+                # Save cleaned raw data
+                output_raw_path = os.path.join(output_folder, f"{base_name}_cleaned.fif")
+                raw.save(output_raw_path, overwrite=True)
+                self.batch_log.emit(f"  ✓ Saved: {os.path.basename(output_raw_path)}")
+                
+                # Save epochs if created
+                if epochs is not None:
+                    output_epochs_path = os.path.join(output_folder, f"{base_name}-epo.fif")
+                    epochs.save(output_epochs_path, overwrite=True)
+                    self.batch_log.emit(f"  ✓ Saved: {os.path.basename(output_epochs_path)}")
+
+                # Step 6: Generate HTML report
+                if params.get('report', True):
+                    self.batch_log.emit("  → Generating report...")
+                    try:
+                        report = mne.Report(title=f"NeuroFlow Batch Report: {base_name}")
+                        report.add_raw(raw, title="Cleaned Data", psd=True)
+                        
+                        if ica is not None:
+                            report.add_ica(ica, title="ICA Components", inst=raw)
+                        
+                        if epochs is not None:
+                            report.add_epochs(epochs, title="Epochs")
+                        
+                        if evoked is not None:
+                            report.add_evokeds(evoked, titles=["ERP"])
+                        
+                        report_path = os.path.join(output_folder, f"{base_name}_report.html")
+                        report.save(report_path, overwrite=True, open_browser=False)
+                        self.batch_log.emit(f"  ✓ Report: {os.path.basename(report_path)}")
+                        
+                    except Exception as e:
+                        self.batch_log.emit(f"  ⚠ Report generation failed: {str(e)}")
+
+                self.batch_log.emit(f"  ✓ Completed: {filename}")
+                successful += 1
+
+            except Exception as e:
+                failed += 1
+                failed_files.append(filename)
+                error_msg = str(e)
+                self.batch_log.emit(f"  ✗ FAILED: {error_msg}")
+                self.batch_error.emit(filename, error_msg)
+                logger.exception(f"Batch processing failed for {filename}")
+
+        # Final summary
+        self.batch_log.emit(f"\n{'='*50}")
+        self.batch_log.emit("BATCH PROCESSING COMPLETE")
+        self.batch_log.emit(f"{'='*50}")
+        self.batch_log.emit(f"✓ Successful: {successful}/{total_files}")
+        self.batch_log.emit(f"✗ Failed: {failed}/{total_files}")
+        
+        if failed_files:
+            self.batch_log.emit(f"Failed files: {', '.join(failed_files)}")
+
+        summary = f"Batch complete: {successful} successful, {failed} failed out of {total_files} files."
+        self.batch_finished.emit(summary)
+        self.finished.emit()
