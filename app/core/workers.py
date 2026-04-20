@@ -1,8 +1,10 @@
 """EEG Processing Worker - Handles MNE-Python tasks on a separate thread."""
 
+import html
 import os
 import logging
 import pickle
+import threading
 
 import mne
 import numpy as np
@@ -18,6 +20,52 @@ except ImportError:
 
 logger = logging.getLogger("NeuroFlow")
 
+# --- Processing Constants ---
+ICA_N_COMPONENTS = 15
+ICA_METHOD = 'fastica'
+ICA_RANDOM_STATE = 97
+ICA_HIGHPASS = 1.0  # High-pass filter applied before ICA fitting
+
+ALPHA_BAND_FMIN = 8.0
+ALPHA_BAND_FMAX = 12.0
+
+DEFAULT_BATCH_HIGHPASS = 1.0
+DEFAULT_BATCH_LOWPASS = 40.0
+DEFAULT_EPOCH_TMIN = -0.2
+DEFAULT_EPOCH_TMAX = 0.8
+
+
+
+# Allowlisted module prefixes for safe unpickling of .nflow session files
+_PICKLE_ALLOWED_MODULE_PREFIXES = frozenset((
+    'mne', 'numpy', 'collections', 'datetime',
+    'pathlib', 'copy', '_codecs', 'codecs',
+))
+
+# Safe builtins that pickle needs for basic Python types
+_PICKLE_SAFE_BUILTINS = frozenset((
+    'dict', 'list', 'set', 'tuple', 'frozenset',
+    'bytes', 'bytearray', 'complex', 'float', 'int', 'str', 'bool',
+    'slice', 'range', 'type', 'object',
+))
+
+
+class RestrictedUnpickler(pickle.Unpickler):
+    """Unpickler that only allows known-safe types (MNE, numpy, builtins).
+
+    Blocks dangerous builtins like eval, exec, __import__ while permitting
+    basic data types needed to reconstruct session state.
+    """
+
+    def find_class(self, module: str, name: str):
+        top_module = module.split('.')[0]
+        if top_module in _PICKLE_ALLOWED_MODULE_PREFIXES:
+            return super().find_class(module, name)
+        if module == 'builtins' and name in _PICKLE_SAFE_BUILTINS:
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(
+            f"Forbidden class in session file: {module}.{name}"
+        )
 
 class EEGWorker(QObject):
     """Worker for MNE-Python analysis tasks on a separate thread."""
@@ -36,6 +84,7 @@ class EEGWorker(QObject):
     report_ready = pyqtSignal(str)  # Emits file path of generated report
     data_updated = pyqtSignal(object, str)  # Emits (raw, info_str) after any pipeline operation
     session_loaded = pyqtSignal(dict)  # Emits loaded session state dictionary
+    epochs_created = pyqtSignal(object)  # Emits epochs object after creation
 
     # Batch processing signals
     batch_progress = pyqtSignal(int, int, str)  # (current_index, total_files, current_filename)
@@ -51,6 +100,20 @@ class EEGWorker(QObject):
         self.events = None
         self.event_id = None
         self.epochs = None  # Holds the created Epochs object for analysis
+        self._cancel_event = threading.Event()  # Thread-safe cancellation flag
+
+    def request_cancel(self) -> None:
+        """Request cancellation of any running batch operation."""
+        self._cancel_event.set()
+
+    @pyqtSlot(object)
+    def set_epochs(self, epochs) -> None:
+        """Set epochs from the GUI thread via signal/slot (thread-safe).
+
+        Args:
+            epochs: MNE Epochs object or None.
+        """
+        self.epochs = epochs
 
 
     def _read_file(self, file_path: str) -> mne.io.BaseRaw | None:
@@ -242,6 +305,17 @@ class EEGWorker(QObject):
             self.error_occurred.emit(f"Pipeline Error: {str(e)}")
             logger.exception("Pipeline execution failed")
 
+    def _fit_ica(self, raw: mne.io.BaseRaw) -> mne.preprocessing.ICA:
+        """Create, filter, and fit an ICA solution on a copy of raw."""
+        ica = mne.preprocessing.ICA(
+            n_components=ICA_N_COMPONENTS, method=ICA_METHOD,
+            random_state=ICA_RANDOM_STATE, max_iter='auto',
+        )
+        raw_for_ica = raw.copy()
+        raw_for_ica.filter(l_freq=ICA_HIGHPASS, h_freq=None, verbose=False)
+        ica.fit(raw_for_ica, verbose=False)
+        return ica
+
     @pyqtSlot()
     def run_ica(self):
         """Fit ICA on the current data."""
@@ -249,17 +323,10 @@ class EEGWorker(QObject):
             self.error_occurred.emit("No data loaded. Cannot run ICA.")
             return
 
-        self.log_message.emit("Fitting ICA (n_components=15, fastica)... This may take a moment.")
+        self.log_message.emit(f"Fitting ICA (n_components={ICA_N_COMPONENTS}, {ICA_METHOD})... This may take a moment.")
 
         try:
-            self.ica = mne.preprocessing.ICA(
-                n_components=15, method='fastica', random_state=97, max_iter='auto'
-            )
-
-            raw_for_ica = self.raw.copy()
-            raw_for_ica.filter(l_freq=1.0, h_freq=None, verbose=False)
-
-            self.ica.fit(raw_for_ica, verbose=False)
+            self.ica = self._fit_ica(self.raw)
             self.log_message.emit("ICA Fit Complete. Emitting signal to plot components...")
 
             self.ica_ready.emit(self.ica)
@@ -363,6 +430,7 @@ class EEGWorker(QObject):
                 summary += f" {n_dropped} dropped due to artifacts."
 
             self.log_message.emit(summary)
+            self.epochs_created.emit(self.epochs)
             self.finished.emit()
 
         except Exception as e:
@@ -527,7 +595,7 @@ class EEGWorker(QObject):
         self.log_message.emit(f"Computing Alpha Band Connectivity (wPLI) on {len(self.epochs)} epochs...")
 
         try:
-            fmin, fmax = 8.0, 12.0
+            fmin, fmax = ALPHA_BAND_FMIN, ALPHA_BAND_FMAX
             sfreq = self.epochs.info['sfreq']
 
             con = mne_connectivity.spectral_connectivity_epochs(
@@ -643,7 +711,7 @@ class EEGWorker(QObject):
             # Add Segmentation Details section
             if segmentation_params:
                 self.log_message.emit("Adding segmentation details to report...")
-                event_name = segmentation_params.get('event_name', 'N/A')
+                event_name = html.escape(str(segmentation_params.get('event_name', 'N/A')))
                 tmin = segmentation_params.get('tmin', 'N/A')
                 tmax = segmentation_params.get('tmax', 'N/A')
                 baseline_status = segmentation_params.get('baseline_status', False)
@@ -737,16 +805,17 @@ class EEGWorker(QObject):
 
         for idx, step in enumerate(history_log, 1):
             # Support both 'action' and 'operation' keys for backwards compatibility
-            operation = step.get("action") or step.get("operation", "Unknown")
+            operation = html.escape(str(step.get("action") or step.get("operation", "Unknown")))
             # Support both 'params' and 'parameters' keys
             params = step.get("params") or step.get("parameters", {})
-            timestamp = step.get("timestamp", "N/A")
 
             # Format parameters as readable string
             if isinstance(params, dict):
-                params_str = ", ".join(f"{k}: {v}" for k, v in params.items()) if params else "N/A"
+                params_str = html.escape(", ".join(f"{k}: {v}" for k, v in params.items())) if params else "N/A"
             else:
-                params_str = str(params)
+                params_str = html.escape(str(params))
+
+            timestamp = html.escape(str(step.get("timestamp", "N/A")))
 
             row_color = "#f9f9f9" if idx % 2 == 0 else "#ffffff"
             html_parts.append(
@@ -829,7 +898,7 @@ class EEGWorker(QObject):
                 return
 
             with open(file_path, 'rb') as f:
-                state_payload = pickle.load(f)
+                state_payload = RestrictedUnpickler(f).load()
 
             # Restore worker state from payload
             self.raw = state_payload.get('raw')
@@ -871,6 +940,7 @@ class EEGWorker(QObject):
                 - report: bool - Whether to generate HTML reports
         """
         self.batch_log.emit(f"Starting batch processing...")
+        self._cancel_event.clear()  # Reset cancellation flag
         self.batch_log.emit(f"Input folder: {input_folder}")
         self.batch_log.emit(f"Output folder: {output_folder}")
 
@@ -898,6 +968,11 @@ class EEGWorker(QObject):
         failed_files = []
 
         for idx, file_path in enumerate(eeg_files):
+            # Check for cancellation
+            if self._cancel_event.is_set():
+                self.batch_log.emit("Batch processing cancelled by user.")
+                break
+
             filename = os.path.basename(file_path)
             base_name = os.path.splitext(filename)[0]
             
@@ -923,8 +998,8 @@ class EEGWorker(QObject):
 
                 # Step 2: Apply filtering
                 if params.get('filter', True):
-                    l_freq = params.get('l_freq', 1.0)
-                    h_freq = params.get('h_freq', 40.0)
+                    l_freq = params.get('l_freq', DEFAULT_BATCH_HIGHPASS)
+                    h_freq = params.get('h_freq', DEFAULT_BATCH_LOWPASS)
                     notch_freq = params.get('notch_freq', 0.0)
 
                     self.batch_log.emit(f"  → Filtering (HP={l_freq}Hz, LP={h_freq}Hz)...")
@@ -945,18 +1020,9 @@ class EEGWorker(QObject):
                     self.batch_log.emit("  → Running Auto-ICA...")
 
                     try:
-                        # Initialize ICA
-                        ica = mne.preprocessing.ICA(
-                            n_components=15, method='fastica', random_state=97, max_iter='auto'
-                        )
-
-                        # Filter for ICA fitting (1Hz high-pass recommended for ICA)
-                        raw_for_ica = raw.copy()
-                        raw_for_ica.filter(l_freq=1.0, h_freq=None, verbose=False)
-
-                        # Fit ICA
+                        # Fit ICA using shared helper
                         self.batch_log.emit("  → Fitting ICA components...")
-                        ica.fit(raw_for_ica, verbose=False)
+                        ica = self._fit_ica(raw)
                         self.batch_log.emit(f"  → ICA fitted with {ica.n_components_} components.")
 
                         # Smart EOG Channel Selection
@@ -964,8 +1030,9 @@ class EEGWorker(QObject):
                         eog_indices = []
 
                         # Option 1: Check for explicit EOG channel types
-                        eog_channels = [ch for ch in raw.ch_names
-                                       if raw.get_channel_types([ch])[0] == 'eog']
+                        all_ch_types = raw.get_channel_types()
+                        eog_channels = [ch for ch, ch_type in zip(raw.ch_names, all_ch_types)
+                                       if ch_type == 'eog']
 
                         if eog_channels:
                             eog_channel = eog_channels[0]
@@ -1032,8 +1099,8 @@ class EEGWorker(QObject):
                         
                         if len(events) > 0:
                             event_name = params.get('event_id', 'All Events')
-                            tmin = params.get('tmin', -0.2)
-                            tmax = params.get('tmax', 0.8)
+                            tmin = params.get('tmin', DEFAULT_EPOCH_TMIN)
+                            tmax = params.get('tmax', DEFAULT_EPOCH_TMAX)
                             apply_baseline = params.get('baseline', True)
                             
                             self.batch_log.emit(f"  → Creating epochs (tmin={tmin}, tmax={tmax})...")

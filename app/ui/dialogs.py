@@ -1,5 +1,6 @@
 """Dialog Components - Dataset info, connectivity plots, and ERP viewer."""
 
+import logging
 import os
 from typing import List, Tuple
 
@@ -18,6 +19,8 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
 from .canvas import MplCanvas
 
+logger = logging.getLogger("NeuroFlow")
+
 
 class ConnectivityDialog(QDialog):
     """Popup window for displaying connectivity plots."""
@@ -26,21 +29,20 @@ class ConnectivityDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Connectivity Explorer")
         self.resize(800, 800)
-        self.layout = QVBoxLayout(self)
+        self.main_layout = QVBoxLayout(self)
         self.canvas = None
 
         self.btn_close = QPushButton("Close")
         self.btn_close.clicked.connect(self.accept)
-        self.layout.addWidget(self.btn_close)
+        self.main_layout.addWidget(self.btn_close)
 
     def plot(self, fig):
-        """Display the given Matplotlib Figure."""
         if self.canvas:
-            self.layout.removeWidget(self.canvas)
+            self.main_layout.removeWidget(self.canvas)
             self.canvas.deleteLater()
 
         self.canvas = FigureCanvasQTAgg(fig)
-        self.layout.insertWidget(0, self.canvas)
+        self.main_layout.insertWidget(0, self.canvas)
 
         fig.patch.set_facecolor('#1e1e1e')
         self.canvas.draw()
@@ -303,7 +305,7 @@ class DatasetInfoDialog(QDialog):
                     table.setItem(row, 1, QTableWidgetItem(str(count)))
 
         except (ValueError, RuntimeError, AttributeError) as e:
-            print(f"Event table creation error: {e}")
+            logger.warning("Event table creation error: %s", e)
             table.setRowCount(1)
             table.setItem(0, 0, QTableWidgetItem("No events found"))
             table.setItem(0, 1, QTableWidgetItem("-"))
@@ -444,7 +446,7 @@ class ERPViewer(QMainWindow):
             ax.set_title(f"Topography at {t*1000:.0f} ms", color='white', fontsize=12)
             self.topomap_canvas.draw()
         except Exception as e:
-            print(f"Topomap Error: {e}")
+            logger.warning("Topomap error: %s", e)
 
 
 
@@ -464,7 +466,6 @@ class ChannelManagerDialog(QDialog):
         self._populate_channels()
 
     def _init_ui(self):
-        """Initialize the dialog UI."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -575,7 +576,6 @@ class ChannelManagerDialog(QDialog):
         layout.addWidget(button_bar)
 
     def _populate_channels(self):
-        """Populate the channel list with all channels from the raw object."""
         if self.raw is None:
             return
 
@@ -593,21 +593,17 @@ class ChannelManagerDialog(QDialog):
             self.channel_list.addItem(item)
 
     def _on_selection_changed(self):
-        """Update selection label and button state when selection changes."""
         selected_count = len(self.channel_list.selectedItems())
         self.selection_label.setText(f"{selected_count} channel(s) selected")
         self.btn_interpolate.setEnabled(selected_count > 0)
 
     def _select_all(self):
-        """Select all channels in the list."""
         self.channel_list.selectAll()
 
     def _deselect_all(self):
-        """Deselect all channels in the list."""
         self.channel_list.clearSelection()
 
     def _on_interpolate_clicked(self):
-        """Emit signal with selected channels and close dialog."""
         selected_channels = []
         for item in self.channel_list.selectedItems():
             # Extract channel name (remove " (marked bad)" suffix if present)
@@ -619,7 +615,6 @@ class ChannelManagerDialog(QDialog):
             self.accept()
 
     def get_selected_channels(self) -> list:
-        """Return list of selected channel names."""
         selected_channels = []
         for item in self.channel_list.selectedItems():
             ch_name = item.text().replace(" (marked bad)", "")

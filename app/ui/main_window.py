@@ -1,11 +1,14 @@
 """Main Window - Primary application window for NeuroFlow."""
 
-import traceback
+import json
+import logging
+import os
+from datetime import datetime
+from pathlib import Path
 
 import mne
 import numpy as np
-
-import os
+from mne import BaseEpochs
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -14,7 +17,7 @@ from PyQt6.QtWidgets import (
     QScrollArea, QSizePolicy, QLabel, QSpinBox
 )
 from PyQt6.QtGui import QAction, QIcon
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QMetaObject, Q_ARG
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QMetaObject, Q_ARG
 
 from app.core.workers import EEGWorker
 from .canvas import MplCanvas
@@ -24,6 +27,8 @@ from .sidebar import (
     SidebarTitle, SectionCard, ParamRow, ParamComboRow, ParamSpinRow,
     ActionButton, StatusLog, CollapsibleBox, EEGNavigationBar, ParamCheckRow
 )
+
+logger = logging.getLogger("NeuroFlow")
 
 
 class MainWindow(QMainWindow):
@@ -43,6 +48,7 @@ class MainWindow(QMainWindow):
     request_generate_report = pyqtSignal(object, object, object, object, list, dict)
     request_save_session = pyqtSignal(str, dict)
     request_load_session = pyqtSignal(str)
+    request_set_epochs = pyqtSignal(object)  # Signal to push epochs to worker thread
 
     def __init__(self):
         super().__init__()
@@ -55,10 +61,18 @@ class MainWindow(QMainWindow):
         self.epochs = None  # Holds epochs for manual inspection
         self.epochs_inspected = False  # Flag to track if epochs have been inspected
 
+        # Shadow copies of worker state (updated via signals, safe to read from GUI thread)
+        self._ica = None
+        self._worker_epochs = None  # Mirrors worker.epochs
+        self._events = None
+        self._event_id = None
+
         # Pipeline history for traceability
         self.pipeline_history = []
         self.source_filename = None  # Base filename without extension
-        
+        self._pending_filter_params = None
+        self._pending_ica_excludes = None
+
         # Current processing info for plot title
         self.current_filter_info = "Raw Signal"
 
@@ -83,6 +97,7 @@ class MainWindow(QMainWindow):
         self.worker.report_ready.connect(self.on_report_ready)
         self.worker.data_updated.connect(self.on_data_updated)
         self.worker.session_loaded.connect(self._restore_session_state)
+        self.worker.epochs_created.connect(self._on_epochs_created)
 
         # Batch processing signals
         self.worker.batch_progress.connect(self._on_batch_progress)
@@ -104,6 +119,7 @@ class MainWindow(QMainWindow):
         self.request_generate_report.connect(self.worker.generate_report)
         self.request_save_session.connect(self.worker.save_session)
         self.request_load_session.connect(self.worker.load_session)
+        self.request_set_epochs.connect(self.worker.set_epochs)
 
         self.thread.start()
 
@@ -182,7 +198,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def on_save_clean_data(self):
-        if not self.worker.raw:
+        if not self.raw_data:
             QMessageBox.warning(self, "No Data", "Please load a dataset first.")
             return
 
@@ -195,7 +211,7 @@ class MainWindow(QMainWindow):
     def save_epochs_click(self):
         """Handle Save Epoched Data menu action."""
         # Use worker.epochs as the single source of truth
-        if self.worker.epochs is None:
+        if self._worker_epochs is None:
             QMessageBox.warning(
                 self, "No Epochs", "Please create epochs first before saving."
             )
@@ -225,8 +241,6 @@ class MainWindow(QMainWindow):
 
     def on_save_finished(self, filename):
         """Handle save completion and save pipeline history."""
-        import json
-        from pathlib import Path
         
         history_saved = False
         history_path = None
@@ -253,7 +267,7 @@ class MainWindow(QMainWindow):
 
     def on_save_project(self):
         """Handle Save Project menu action - save to current file or prompt for new."""
-        if self.worker.raw is None and self.worker.epochs is None:
+        if self.raw_data is None and self._worker_epochs is None:
             QMessageBox.warning(self, "No Data", "Please load a dataset first before saving a project.")
             return
 
@@ -267,7 +281,7 @@ class MainWindow(QMainWindow):
 
     def on_save_project_as(self):
         """Handle Save Project As menu action - always prompt for new file."""
-        if self.worker.raw is None and self.worker.epochs is None:
+        if self.raw_data is None and self._worker_epochs is None:
             QMessageBox.warning(self, "No Data", "Please load a dataset first before saving a project.")
             return
 
@@ -339,13 +353,13 @@ class MainWindow(QMainWindow):
         # Build the complete state payload
         state_payload = {
             # Backend MNE objects
-            'raw': self.worker.raw,
-            'raw_original': self.worker.raw_original,
-            'ica': self.worker.ica,
-            'epochs': self.worker.epochs,  # Created epochs (single source of truth)
+            'raw': self.raw_data,
+            'raw_original': self.raw_original,
+            'ica': self._ica,
+            'epochs': self._worker_epochs,  # Created epochs (single source of truth)
             'epochs_data': self.epochs_data,  # Loaded epoch files (-epo.fif)
-            'events': self.worker.events,
-            'event_id': self.worker.event_id,
+            'events': self._events,
+            'event_id': self._event_id,
             # Metadata
             'pipeline_history': self.pipeline_history,
             'source_filename': self.source_filename,
@@ -412,7 +426,11 @@ class MainWindow(QMainWindow):
         
         # Sync epochs: set both self.epochs and epochs_data for consistency
         self.epochs = epochs_data
+        self._worker_epochs = epochs_data  # Shadow copy
         self.epochs_data = state.get('epochs_data')  # For loaded -epo.fif files
+        self._ica = state.get('ica')
+        self._events = state.get('events')
+        self._event_id = state.get('event_id')
 
         # Call on_data_loaded WITHOUT showing message box (we'll show our own)
         # We need to manually do what on_data_loaded does but skip the message
@@ -447,7 +465,7 @@ class MainWindow(QMainWindow):
         self.epochs_inspected = saved_epochs_inspected
 
         # Enable epoch-related buttons if epochs exist
-        if self.worker.epochs is not None:
+        if self._worker_epochs is not None:
             self.btn_inspect_epochs.setEnabled(True)
             self.btn_erp.setEnabled(True)
             self.btn_create_epochs.setEnabled(True)
@@ -456,7 +474,6 @@ class MainWindow(QMainWindow):
         self.update_time_series_plot()
 
         # Show single success message
-        from pathlib import Path
         project_name = Path(self.current_project_path).stem if self.current_project_path else saved_source_filename
         QMessageBox.information(
             self,
@@ -481,7 +498,7 @@ class MainWindow(QMainWindow):
             self.raw_original = None
         else:
             self.raw_data = data
-            self.raw_original = self.worker.raw_original
+            self.raw_original = self.raw_original or state.get('raw_original')
             self.epochs_data = None
 
         # Enable buttons based on data type
@@ -936,6 +953,28 @@ class MainWindow(QMainWindow):
             if section is not expanded_section:
                 section.setExpanded(False)
 
+    def _on_epochs_created(self, epochs):
+        """Handle epochs_created signal from worker — update shadow copy."""
+        self._worker_epochs = epochs
+
+
+    def _log_pipeline(self, action: str, params: dict) -> None:
+        """Record a pipeline step with timestamp."""
+        self.pipeline_history.append({
+            "timestamp": datetime.now().isoformat(timespec='seconds'),
+            "action": action,
+            "params": params,
+        })
+
+    def _flush_pending_pipeline_logs(self) -> None:
+        """Flush any pending filter/ICA pipeline log entries."""
+        if self._pending_filter_params is not None:
+            self._log_pipeline("filter", self._pending_filter_params)
+            self._pending_filter_params = None
+        if self._pending_ica_excludes is not None:
+            self._log_pipeline("ica_exclusion", {"excluded_components": self._pending_ica_excludes})
+            self._pending_ica_excludes = None
+
     def log_status(self, message):
         """Appends message to the sidebar status log."""
         self.log_area.append(f">> {message}")
@@ -963,8 +1002,6 @@ class MainWindow(QMainWindow):
 
     def on_data_loaded(self, data):
         """Called when worker successfully loads data."""
-        from mne import BaseEpochs
-        
         # Determine if we loaded epochs or raw data
         is_epochs = isinstance(data, BaseEpochs)
         
@@ -973,14 +1010,15 @@ class MainWindow(QMainWindow):
             self.raw_data = None
             self.raw_original = None
             # Also set worker.epochs so analysis functions can use it
-            self.worker.epochs = data
+            self._worker_epochs = data
+            self.request_set_epochs.emit(data)
             # Enable epoch-related buttons immediately for loaded epochs
             self.btn_inspect_epochs.setEnabled(True)
             self.btn_erp.setEnabled(True)
             self.btn_create_epochs.setEnabled(True)  # Can still "use" epochs
         else:
             self.raw_data = data  # Store reference
-            self.raw_original = self.worker.raw_original  # Store original for overlay comparison
+            self.raw_original = data.copy()  # Store original for overlay comparison
             self.epochs_data = None
             
         self.btn_run.setEnabled(True)
@@ -997,24 +1035,17 @@ class MainWindow(QMainWindow):
         # Extract and store source filename
         if is_epochs:
             if hasattr(data, 'filename') and data.filename:
-                from pathlib import Path
                 self.source_filename = Path(data.filename).stem
             else:
                 self.source_filename = "unknown_epochs"
-        elif self.worker.raw is not None and hasattr(self.worker.raw, 'filenames'):
-            from pathlib import Path
-            source_path = self.worker.raw.filenames[0]
+        elif self.raw_data is not None and hasattr(self.raw_data, 'filenames'):
+            source_path = self.raw_data.filenames[0]
             self.source_filename = Path(source_path).stem
         else:
             self.source_filename = "unknown"
         
         # Log data loaded event
-        from datetime import datetime
-        self.pipeline_history.append({
-            "timestamp": datetime.now().isoformat(timespec='seconds'),
-            "action": "data_loaded",
-            "params": {"filename": self.source_filename, "type": "epochs" if is_epochs else "raw"}
-        })
+        self._log_pipeline("data_loaded", {"filename": self.source_filename, "type": "epochs" if is_epochs else "raw"})
 
         # Populate Channels for TFR
         self.combo_channels.clear()
@@ -1138,11 +1169,12 @@ class MainWindow(QMainWindow):
         instead of trying to create new epochs from raw data.
         """
         # Check if we already have loaded epochs (from -epo.fif file)
-        if self.epochs_data is not None or self.worker.epochs is not None:
+        if self.epochs_data is not None or self._worker_epochs is not None:
             # Epochs already exist - use them directly
-            if self.worker.epochs is None and self.epochs_data is not None:
+            if self._worker_epochs is None and self.epochs_data is not None:
                 # Transfer loaded epochs to worker
-                self.worker.epochs = self.epochs_data
+                self._worker_epochs = self.epochs_data
+                self.request_set_epochs.emit(self.epochs_data)
             
             self.log_status("Using pre-loaded epochs from file.")
             self.btn_inspect_epochs.setEnabled(True)
@@ -1152,13 +1184,13 @@ class MainWindow(QMainWindow):
             self.epochs_inspected = False
             QMessageBox.information(
                 self, "Epochs Ready", 
-                f"Using {len(self.worker.epochs)} pre-loaded epochs.\n"
+                f"Using {len(self._worker_epochs)} pre-loaded epochs.\n"
                 "You can now inspect epochs or compute ERP/TFR."
             )
             return
 
         # No pre-loaded epochs - need to create from raw data
-        if self.worker.raw is None:
+        if self.raw_data is None:
             self.show_error("No raw data loaded. Cannot create epochs.\n\n"
                           "If you loaded an epoched file, epochs are already available.\n"
                           "Use 'Inspect Epochs' or 'Compute ERP' directly.")
@@ -1190,7 +1222,7 @@ class MainWindow(QMainWindow):
         This MUST run on Main Thread since epochs.plot() creates a GUI window.
         """
         # Check if epochs have been created
-        if self.worker.epochs is None:
+        if self._worker_epochs is None:
             self.show_error("No epochs available. Please create epochs first.")
             return
 
@@ -1198,7 +1230,7 @@ class MainWindow(QMainWindow):
 
         try:
             # Copy epochs from worker to main window for inspection
-            self.epochs = self.worker.epochs.copy()
+            self.epochs = self._worker_epochs.copy()
 
             n_epochs_before = len(self.epochs)
             self.log_status(
@@ -1223,7 +1255,7 @@ class MainWindow(QMainWindow):
                 scalings='auto',
                 n_epochs=10,
                 n_channels=n_channels,
-                title=f"Epoch Inspection (Click to reject)"
+                title="Epoch Inspection (Click to reject)"
             )
 
             # Store reference and connect to close event
@@ -1237,12 +1269,17 @@ class MainWindow(QMainWindow):
             self.log_status("Epoch viewer opened. Click epochs to reject, then close the window.")
 
         except Exception as e:
+            # Restore matplotlib style on error to prevent dark theme breakage
+            try:
+                plt.rcParams.update(original_style)
+            except Exception:
+                pass
             self.show_error(f"Epoch inspection error: {str(e)}")
-            traceback.print_exc()
+            logger.exception("Epoch inspection error")
 
     def _on_epoch_fig_closed(self, event):
         """Handle epoch figure close event - sync and drop bad epochs."""
-        import matplotlib.pyplot as plt
+        import matplotlib.pyplot as plt  # needed here for plt.close/rcParams
 
         try:
             fig = self._epoch_fig
@@ -1267,7 +1304,8 @@ class MainWindow(QMainWindow):
             n_rejected = n_epochs_before - n_epochs_after
 
             # Update worker's epochs with the inspected/cleaned epochs
-            self.worker.epochs = self.epochs
+            self._worker_epochs = self.epochs
+            self.request_set_epochs.emit(self.epochs)
 
             self.epochs_inspected = True
             self.log_status(
@@ -1276,14 +1314,9 @@ class MainWindow(QMainWindow):
             )
 
             # Log manual epoch rejection to pipeline history
-            from datetime import datetime
-            self.pipeline_history.append({
-                "timestamp": datetime.now().isoformat(timespec='seconds'),
-                "action": "manual_epoch_rejection",
-                "params": {
-                    "kept": n_epochs_after,
-                    "rejected": n_rejected
-                }
+            self._log_pipeline("manual_epoch_rejection", {
+                "kept": n_epochs_after,
+                "rejected": n_rejected,
             })
 
             if n_epochs_after == 0:
@@ -1300,14 +1333,14 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             self.log_status(f"Error processing epoch rejections: {str(e)}")
-            traceback.print_exc()
+            logger.exception("Error processing epoch rejections")
 
     def compute_erp_click(self):
         """
         Compute ERP using pre-existing epochs from the worker.
         """
         # Check if epochs exist
-        if self.worker.epochs is None:
+        if self._worker_epochs is None:
             self.show_error("No epochs available. Please create epochs first using the Segmentation section.")
             return
 
@@ -1330,6 +1363,7 @@ class MainWindow(QMainWindow):
         Slot to plot ICA components on the Main Thread.
         This fixes the 'Matplotlib GUI outside main thread' crash.
         """
+        self._ica = ica_solution  # Cache ICA reference on GUI thread
         self.log_status("Opening ICA Components Window...")
         try:
             # Standard MNE Plot (creates a new Qt Window)
@@ -1339,7 +1373,7 @@ class MainWindow(QMainWindow):
 
     def compute_tfr_click(self):
         # Check if epochs exist
-        if self.worker.epochs is None:
+        if self._worker_epochs is None:
             self.show_error("No epochs available. Please create epochs first using the Segmentation section.")
             return
 
@@ -1393,7 +1427,7 @@ class MainWindow(QMainWindow):
 
     def compute_connectivity_click(self):
         # Check if epochs exist
-        if self.worker.epochs is None:
+        if self._worker_epochs is None:
             self.show_error("No epochs available. Please create epochs first using the Segmentation section.")
             return
 
@@ -1442,7 +1476,7 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             self.show_error(f"Connectivity Plot Error: {e}")
-            traceback.print_exc()
+            logger.exception("Connectivity plot error")
 
     def update_plot(self, freqs, psd_mean, filter_info_str):
         """Updates the Matplotlib canvas with the new PSD data.
@@ -1452,25 +1486,8 @@ class MainWindow(QMainWindow):
         """
         self.canvas.axes.clear()
 
-        # Log filter operation if pending (from launch_pipeline, not ICA)
-        if hasattr(self, '_pending_filter_params') and self._pending_filter_params is not None:
-            from datetime import datetime
-            self.pipeline_history.append({
-                "timestamp": datetime.now().isoformat(timespec='seconds'),
-                "action": "filter",
-                "params": self._pending_filter_params
-            })
-            self._pending_filter_params = None  # Clear pending
-
-        # Log ICA exclusion if pending (from apply_ica_click)
-        if hasattr(self, '_pending_ica_excludes') and self._pending_ica_excludes is not None:
-            from datetime import datetime
-            self.pipeline_history.append({
-                "timestamp": datetime.now().isoformat(timespec='seconds'),
-                "action": "ica_exclusion",
-                "params": {"excluded_components": self._pending_ica_excludes}
-            })
-            self._pending_ica_excludes = None  # Clear pending
+        # Flush any pending pipeline log entries
+        self._flush_pending_pipeline_logs()
 
         # PSD Plot Logic - Linear Power in μV²/Hz
         # MNE returns V²/Hz, multiply by 1e12 to convert to μV²/Hz
@@ -1492,13 +1509,10 @@ class MainWindow(QMainWindow):
 
     def update_time_series_plot(self, _state=None):
         """Update the Signal Monitor with clinical stacked time-series plot.
-        
+
         Args:
             _state: Optional state value from checkbox/slider signals (ignored).
         """
-        from mne import BaseEpochs
-        import numpy as np
-        
         data = self.raw_data or getattr(self, 'epochs_data', None)
         if data is None:
             return
@@ -1506,7 +1520,6 @@ class MainWindow(QMainWindow):
         # Handle epochs data: flatten 3D (n_epochs, n_channels, n_times) to 2D for visualization
         plot_data = data
         if isinstance(data, BaseEpochs):
-            import mne
             # Get 3D array: (n_epochs, n_channels, n_times)
             epochs_array = data.get_data()
             # Transpose to (n_channels, n_epochs, n_times) then reshape to (n_channels, n_total_samples)
@@ -1542,25 +1555,8 @@ class MainWindow(QMainWindow):
         self.raw_data = raw
         self.current_filter_info = info_str
         
-        # Log filter operation if pending
-        if hasattr(self, '_pending_filter_params') and self._pending_filter_params is not None:
-            from datetime import datetime
-            self.pipeline_history.append({
-                "timestamp": datetime.now().isoformat(timespec='seconds'),
-                "action": "filter",
-                "params": self._pending_filter_params
-            })
-            self._pending_filter_params = None
-
-        # Log ICA exclusion if pending
-        if hasattr(self, '_pending_ica_excludes') and self._pending_ica_excludes is not None:
-            from datetime import datetime
-            self.pipeline_history.append({
-                "timestamp": datetime.now().isoformat(timespec='seconds'),
-                "action": "ica_exclusion",
-                "params": {"excluded_components": self._pending_ica_excludes}
-            })
-            self._pending_ica_excludes = None
+        # Flush any pending pipeline log entries
+        self._flush_pending_pipeline_logs()
         
         # Update the time-series plot
         self.update_time_series_plot()
@@ -1621,18 +1617,9 @@ class MainWindow(QMainWindow):
         channel_str = ", ".join(channels)
         self.log_status(f"Successfully interpolated channels: {channel_str}")
         
-        # Update raw_data reference
-        self.raw_data = self.worker.raw
-        
-        # Add to pipeline history
-        from datetime import datetime
-        self.pipeline_history.append({
-            "timestamp": datetime.now().isoformat(timespec='seconds'),
-            "action": "channel_interpolation",
-            "params": {
-                "channels": channels,
-                "method": "spherical_spline"
-            }
+        self._log_pipeline("channel_interpolation", {
+            "channels": channels,
+            "method": "spherical_spline",
         })
         
         # Update the time-series plot to reflect changes
@@ -1667,7 +1654,7 @@ class MainWindow(QMainWindow):
         # Emit signal to worker thread
         self.request_generate_report.emit(
             data,
-            self.worker.ica,
+            self._ica,
             self.epochs,
             evoked,
             self.pipeline_history,
@@ -1676,8 +1663,7 @@ class MainWindow(QMainWindow):
 
     def on_report_ready(self, report_path: str):
         """Handle successful report generation."""
-        import webbrowser
-        import os
+        import webbrowser  # lazy import: rarely used, avoids startup cost
 
         abs_path = os.path.abspath(report_path)
         self.log_status(f"Report generated: {abs_path}")
@@ -1695,9 +1681,12 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Clean up thread on close."""
+        self.worker.request_cancel()
         self.worker.deleteLater()
         self.thread.quit()
-        self.thread.wait()
+        if not self.thread.wait(5000):
+            self.thread.terminate()
+            self.thread.wait()
         event.accept()
 
 
@@ -1830,6 +1819,7 @@ class MainWindow(QMainWindow):
 
     def _on_batch_canceled(self) -> None:
         """Handle batch cancellation."""
+        self.worker.request_cancel()
         self.log_status("Batch processing was canceled by user.")
         # Re-enable batch controls
         self.btn_start_batch.setEnabled(True)

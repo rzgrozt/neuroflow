@@ -1,6 +1,9 @@
 """NeuroFlow - Professional EEG Analysis Application."""
 
+import logging
 import sys
+
+import matplotlib.pyplot as plt
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QIcon
 from app.ui.main_window import MainWindow
@@ -8,6 +11,13 @@ from app.ui.theme import apply_modern_theme
 
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    )
+
+    plt.style.use('dark_background')
+
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon("assets/neuroflow_icon.png"))
     app.setStyle("Fusion")

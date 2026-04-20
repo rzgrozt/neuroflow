@@ -3,10 +3,10 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QLineEdit, QComboBox, QDoubleSpinBox, QTextEdit,
-    QScrollArea, QSizePolicy, QGraphicsDropShadowEffect
+    QScrollArea, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QEvent, QTimer
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont
 
 
 class NoScrollComboBox(QComboBox):
