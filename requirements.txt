@@ -13,7 +13,3 @@ pandas>=2.0.0
 # --- Visualization ---
 matplotlib>=3.8.0
 pillow>=10.0.0
-
-# --- Utilities & IO ---
-requests>=2.31.0
-h5py>=3.8.0
