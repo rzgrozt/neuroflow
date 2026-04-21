@@ -1,5 +1,6 @@
 """Dialog Components - Dataset info, connectivity plots, and ERP viewer."""
 
+import json
 import logging
 import os
 from typing import List, Tuple
@@ -7,6 +8,7 @@ from typing import List, Tuple
 import mne
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
 
 from PyQt6.QtWidgets import (
     QDialog, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -23,20 +25,34 @@ logger = logging.getLogger("NeuroFlow")
 
 
 class ConnectivityDialog(QDialog):
-    """Popup window for displaying connectivity plots."""
+    """Popup window for displaying connectivity plots.
 
-    def __init__(self, parent=None):
+    Provides a dialog to visualize functional connectivity results
+    using matplotlib figures embedded via PyQt6.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialize the connectivity dialog.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent)
         self.setWindowTitle("Connectivity Explorer")
         self.resize(800, 800)
         self.main_layout = QVBoxLayout(self)
-        self.canvas = None
+        self.canvas: FigureCanvasQTAgg | None = None
 
         self.btn_close = QPushButton("Close")
         self.btn_close.clicked.connect(self.accept)
         self.main_layout.addWidget(self.btn_close)
 
-    def plot(self, fig):
+    def plot(self, fig: Figure) -> None:
+        """Plot a connectivity figure in the dialog.
+
+        Args:
+            fig: MNE figure to display.
+        """
         if self.canvas:
             self.main_layout.removeWidget(self.canvas)
             self.canvas.deleteLater()
@@ -49,11 +65,20 @@ class ConnectivityDialog(QDialog):
 
 
 class DatasetInfoDialog(QDialog):
-    """Dialog displaying dataset metadata and event statistics."""
+    """Dialog displaying dataset metadata and event statistics.
 
-    def __init__(self, data, parent=None, pipeline_history: list = None):
+    Shows comprehensive information about loaded EEG data including
+    file metadata, event counts, and processing pipeline history.
+    """
+
+    def __init__(
+        self,
+        data: object,
+        parent: QWidget | None = None,
+        pipeline_history: list | None = None,
+    ) -> None:
         """Initialize DatasetInfoDialog.
-        
+
         Args:
             data: MNE Raw or Epochs object.
             parent: Parent widget.
@@ -64,11 +89,12 @@ class DatasetInfoDialog(QDialog):
         self.resize(550, 500)
         self.raw = data  # Can be Raw or Epochs
         self.is_epochs = isinstance(data, mne.BaseEpochs)
-        self.pipeline_history = pipeline_history or []
+        self.pipeline_history: list = pipeline_history or []
 
         self._init_ui()
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
+        """Initialize the dialog UI components."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -138,7 +164,6 @@ class DatasetInfoDialog(QDialog):
         history_layout.setContentsMargins(16, 16, 16, 16)
         history_layout.setSpacing(12)
 
-        import json
         history_text = QTextEdit()
         history_text.setReadOnly(True)
         history_text.setFont(QFont("JetBrains Mono", 12))
@@ -253,8 +278,12 @@ class DatasetInfoDialog(QDialog):
 
         return info_pairs
 
-    def _create_event_table(self):
-        """Create table widget displaying event type counts."""
+    def _create_event_table(self) -> QTableWidget:
+        """Create table widget displaying event type counts.
+
+        Returns:
+            Configured QTableWidget with event statistics.
+        """
         table = QTableWidget()
         table.setColumnCount(2)
         table.setHorizontalHeaderLabels(["Event Type/ID", "Count"])
@@ -314,9 +343,23 @@ class DatasetInfoDialog(QDialog):
 
 
 class ERPViewer(QMainWindow):
-    """Interactive ERP analysis window with butterfly plot and topomap."""
+    """Interactive ERP analysis window with butterfly plot and topomap.
 
-    def __init__(self, evoked, parent=None):
+    Provides an interactive viewer for evoked potential data with
+    synchronized butterfly plot and topographic map display.
+    """
+
+    def __init__(
+        self,
+        evoked: mne.Evoked,
+        parent: QWidget | None = None,
+    ) -> None:
+        """Initialize the ERP viewer.
+
+        Args:
+            evoked: MNE Evoked object containing ERP data.
+            parent: Optional parent widget.
+        """
         super().__init__(parent)
         self.evoked = evoked
         self.setWindowTitle("Interactive ERP Explorer")
@@ -326,7 +369,7 @@ class ERPViewer(QMainWindow):
         self.times = self.evoked.times
         self.tmin = self.times[0]
         self.tmax = self.times[-1]
-        self.current_time = 0.0
+        self.current_time: float = 0.0
         self.vline = None
 
         self.debounce_timer = QTimer()
@@ -336,7 +379,8 @@ class ERPViewer(QMainWindow):
         self.init_ui()
         self.plot_initial_state()
 
-    def apply_dark_theme(self):
+    def apply_dark_theme(self) -> None:
+        """Apply dark theme stylesheet to the ERP viewer."""
         self.setStyleSheet("""
             QMainWindow { background-color: #0d0d12; }
             QLabel { color: #ffffff; font-size: 14px; font-weight: bold; }
@@ -364,7 +408,8 @@ class ERPViewer(QMainWindow):
             }
         """)
 
-    def init_ui(self):
+    def init_ui(self) -> None:
+        """Initialize the UI layout with butterfly canvas, topomap, and controls."""
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout(main_widget)
@@ -403,7 +448,7 @@ class ERPViewer(QMainWindow):
 
         main_layout.addWidget(splitter)
 
-    def plot_initial_state(self):
+    def plot_initial_state(self) -> None:
         """Draw the static butterfly plot and initial topomap."""
         ax = self.butterfly_canvas.axes
         ax.clear()
@@ -420,7 +465,12 @@ class ERPViewer(QMainWindow):
 
         self.update_topomap_heavy()
 
-    def on_time_changed(self, value):
+    def on_time_changed(self, value: int) -> None:
+        """Handle time slider value changes.
+
+        Args:
+            value: Time value in milliseconds.
+        """
         time_sec = value / 1000.0
         self.current_time = time_sec
         self.lbl_time.setText(f"Time: {value} ms")
@@ -431,7 +481,8 @@ class ERPViewer(QMainWindow):
 
         self.debounce_timer.start(100)
 
-    def update_topomap_heavy(self):
+    def update_topomap_heavy(self) -> None:
+        """Update the topographic map at the current time point."""
         t = self.current_time
 
         ax = self.topomap_canvas.axes
@@ -451,21 +502,32 @@ class ERPViewer(QMainWindow):
 
 
 class ChannelManagerDialog(QDialog):
-    """Dialog for managing and interpolating bad EEG channels."""
-    
+    """Dialog for managing and interpolating bad EEG channels.
+
+    Provides a UI for selecting channels to mark as bad and
+    trigger spherical spline interpolation.
+    """
+
     interpolate_requested = pyqtSignal(list)  # Emits list of channels to interpolate
 
-    def __init__(self, raw: mne.io.BaseRaw, parent=None):
+    def __init__(self, raw: object, parent: QWidget | None = None) -> None:
+        """Initialize the channel manager dialog.
+
+        Args:
+            raw: MNE Raw object containing channel data.
+            parent: Optional parent widget.
+        """
         super().__init__(parent)
         self.setWindowTitle("Channel Manager")
         self.resize(450, 550)
         self.raw = raw
         self.setModal(True)
-        
+
         self._init_ui()
         self._populate_channels()
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
+        """Initialize the dialog UI with channel list and controls."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -544,13 +606,13 @@ class ChannelManagerDialog(QDialog):
         # Select All / Deselect All buttons
         self.btn_select_all = QPushButton("Select All")
         self.btn_select_all.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_select_all.setStyleSheet(self._get_secondary_button_style())
+        self.btn_select_all.setStyleSheet(self._get_button_style("secondary"))
         self.btn_select_all.clicked.connect(self._select_all)
         button_layout.addWidget(self.btn_select_all)
 
         self.btn_deselect_all = QPushButton("Deselect All")
         self.btn_deselect_all.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_deselect_all.setStyleSheet(self._get_secondary_button_style())
+        self.btn_deselect_all.setStyleSheet(self._get_button_style("secondary"))
         self.btn_deselect_all.clicked.connect(self._deselect_all)
         button_layout.addWidget(self.btn_deselect_all)
 
@@ -560,7 +622,7 @@ class ChannelManagerDialog(QDialog):
         self.btn_cancel = QPushButton("Cancel")
         self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cancel.setFixedWidth(90)
-        self.btn_cancel.setStyleSheet(self._get_secondary_button_style())
+        self.btn_cancel.setStyleSheet(self._get_button_style("secondary"))
         self.btn_cancel.clicked.connect(self.reject)
         button_layout.addWidget(self.btn_cancel)
 
@@ -568,85 +630,100 @@ class ChannelManagerDialog(QDialog):
         self.btn_interpolate = QPushButton("Interpolate")
         self.btn_interpolate.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_interpolate.setFixedWidth(120)
-        self.btn_interpolate.setStyleSheet(self._get_primary_button_style())
+        self.btn_interpolate.setStyleSheet(self._get_button_style("primary"))
         self.btn_interpolate.clicked.connect(self._on_interpolate_clicked)
         self.btn_interpolate.setEnabled(False)
         button_layout.addWidget(self.btn_interpolate)
 
         layout.addWidget(button_bar)
 
-    def _populate_channels(self):
+    def _populate_channels(self) -> None:
+        """Populate the channel list with all available channels."""
         if self.raw is None:
             return
 
         current_bads = self.raw.info.get('bads', [])
-        
+
         for ch_name in self.raw.ch_names:
             item = QListWidgetItem(ch_name)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            
+
             # Mark already known bad channels as selected
             if ch_name in current_bads:
                 item.setSelected(True)
                 item.setText(f"{ch_name} (marked bad)")
-            
+
             self.channel_list.addItem(item)
 
-    def _on_selection_changed(self):
+    def _on_selection_changed(self) -> None:
+        """Handle channel selection changes."""
         selected_count = len(self.channel_list.selectedItems())
         self.selection_label.setText(f"{selected_count} channel(s) selected")
         self.btn_interpolate.setEnabled(selected_count > 0)
 
-    def _select_all(self):
+    def _select_all(self) -> None:
+        """Select all channels in the list."""
         self.channel_list.selectAll()
 
-    def _deselect_all(self):
+    def _deselect_all(self) -> None:
+        """Deselect all channels in the list."""
         self.channel_list.clearSelection()
 
-    def _on_interpolate_clicked(self):
+    def _on_interpolate_clicked(self) -> None:
+        """Handle interpolate button click and emit signal."""
         selected_channels = []
         for item in self.channel_list.selectedItems():
             # Extract channel name (remove " (marked bad)" suffix if present)
             ch_name = item.text().replace(" (marked bad)", "")
             selected_channels.append(ch_name)
-        
+
         if selected_channels:
             self.interpolate_requested.emit(selected_channels)
             self.accept()
 
-    def get_selected_channels(self) -> list:
+    def get_selected_channels(self) -> list[str]:
+        """Get list of currently selected channel names.
+
+        Returns:
+            List of selected channel name strings.
+        """
         selected_channels = []
         for item in self.channel_list.selectedItems():
             ch_name = item.text().replace(" (marked bad)", "")
             selected_channels.append(ch_name)
         return selected_channels
 
-    def _get_primary_button_style(self) -> str:
-        """Return stylesheet for primary action buttons."""
-        return """
-            QPushButton {
-                background-color: #0080b8;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-weight: 600;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #0090cc;
-            }
-            QPushButton:pressed {
-                background-color: #0070a0;
-            }
-            QPushButton:disabled {
-                background-color: #404060;
-                color: #808090;
-            }
-        """
+    def _get_button_style(self, style_type: str = "primary") -> str:
+        """Get CSS style string for a button.
 
-    def _get_secondary_button_style(self) -> str:
-        """Return stylesheet for secondary action buttons."""
+        Args:
+            style_type: Either 'primary' or 'secondary'.
+
+        Returns:
+            QSS style string for the button.
+        """
+        if style_type == "primary":
+            return """
+                QPushButton {
+                    background-color: #0080b8;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    font-weight: 600;
+                    font-size: 13px;
+                }
+                QPushButton:hover {
+                    background-color: #0090cc;
+                }
+                QPushButton:pressed {
+                    background-color: #0070a0;
+                }
+                QPushButton:disabled {
+                    background-color: #404060;
+                    color: #808090;
+                }
+            """
         return """
             QPushButton {
                 background-color: #252538;

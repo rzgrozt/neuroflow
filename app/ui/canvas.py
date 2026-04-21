@@ -1,10 +1,47 @@
+"""Matplotlib Canvas - PyQt6 integration for EEG visualization."""
+
+from typing import Optional
+
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from PyQt6.QtWidgets import QWidget
 
 import numpy as np
 
+# Type aliases for MNE objects
+try:
+    from mne import BaseEpochs, BaseRaw
+    MNEData = Optional[BaseEpochs | BaseRaw]
+except ImportError:
+    MNEData = Optional[object]
+
+
 class MplCanvas(FigureCanvasQTAgg):
-    def __init__(self, parent=None, width=5, height=4, dpi=100):
+    """Matplotlib canvas with dark theme for EEG signal visualization.
+
+    Wraps FigureCanvasQTAgg to integrate matplotlib plots with PyQt6,
+    providing a dark-themed EEG time-series plotter with channel overlay support.
+
+    Attributes:
+        fig: The matplotlib Figure object.
+        axes: The matplotlib Axes object for plotting.
+    """
+
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        width: float = 5.0,
+        height: float = 4.0,
+            dpi: int = 100
+        ) -> None:
+        """Initialize the MplCanvas with dark theme settings.
+
+        Args:
+            parent: Parent Qt widget (default: None).
+            width: Figure width in inches (default: 5).
+            height: Figure height in inches (default: 4).
+            dpi: Dots per inch resolution (default: 100).
+        """
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.axes = self.fig.add_subplot(111)
         self.fig.patch.set_facecolor('#1e1e1e')
@@ -12,12 +49,35 @@ class MplCanvas(FigureCanvasQTAgg):
 
         super().__init__(self.fig)
 
-    def plot_time_series(self, data, title, overlay_data=None, start_time=0.0,
-                         duration=10.0, scale=50.0, n_channels=None):
+    def plot_time_series(
+        self,
+        data: MNEData,
+        title: str,
+        overlay_data: Optional[MNEData] = None,
+        start_time: float = 0.0,
+        duration: float = 10.0,
+        scale: float = 50.0,
+        n_channels: Optional[int] = None
+    ) -> None:
+        """Plot EEG time-series data with optional channel overlay.
+
+        Renders EEG signals as waterfall (butterfly) plot with configurable
+        time window, scale, and channel limit. Supports both Raw and Epochs
+        data from MNE.
+
+        Args:
+            data: MNE Raw or Epochs object containing EEG data.
+            title: Plot title displayed at the top.
+            overlay_data: Optional secondary data for overlay comparison.
+            start_time: Start time in seconds for Raw data (default: 0.0).
+            duration: Time window duration in seconds (default: 10.0).
+            scale: Y-axis scale factor in µV (default: 50.0).
+            n_channels: Limit to first N channels (default: all).
+        """
         from mne import BaseEpochs
-        
+
         self.axes.clear()
-        
+
         if data is None:
             self.axes.text(
                 0.5, 0.5, 'No data available',
@@ -25,7 +85,7 @@ class MplCanvas(FigureCanvasQTAgg):
             )
             self.draw()
             return
-        
+
         is_epochs = isinstance(data, BaseEpochs)
 
         sfreq = data.info['sfreq']
@@ -130,6 +190,6 @@ class MplCanvas(FigureCanvasQTAgg):
             color='#888888', fontsize=8,
             ha='right', va='bottom'
         )
-        
+
         self.fig.tight_layout()
         self.draw()
