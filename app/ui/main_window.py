@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 
@@ -126,8 +127,8 @@ class MainWindow(QMainWindow):
         self.init_ui()
         self.create_menu()
 
-    def create_menu(self):
-        """Create the menu bar."""
+    def create_menu(self) -> None:
+        """Create the application menu bar with File and Help menus."""
         menu_bar = self.menuBar()
 
         file_menu = menu_bar.addMenu("&File")
@@ -192,12 +193,13 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
 
-    def show_about_dialog(self):
-        """Show the About dialog."""
+    def show_about_dialog(self) -> None:
+        """Show the NeuroFlow About dialog with application information."""
         dialog = ModernAboutDialog(self)
         dialog.exec()
 
-    def on_save_clean_data(self):
+    def on_save_clean_data(self) -> None:
+        """Handle Export Clean Data menu action - saves processed data to .fif format."""
         if not self.raw_data:
             QMessageBox.warning(self, "No Data", "Please load a dataset first.")
             return
@@ -208,8 +210,8 @@ class MainWindow(QMainWindow):
         if filename:
             self.request_save_data.emit(filename)
 
-    def save_epochs_click(self):
-        """Handle Save Epoched Data menu action."""
+    def save_epochs_click(self) -> None:
+        """Handle Export Epoched Data menu action - saves epochs to .fif format."""
         # Use worker.epochs as the single source of truth
         if self._worker_epochs is None:
             QMessageBox.warning(
@@ -223,7 +225,8 @@ class MainWindow(QMainWindow):
         if filename:
             self.request_save_epochs.emit(filename)
 
-    def on_take_screenshot(self):
+    def on_take_screenshot(self) -> None:
+        """Handle Screenshot menu action - captures and saves a screenshot of the application."""
         screen = QApplication.primaryScreen()
         if not screen:
             self.log_status("Error: No screen detected.")
@@ -239,8 +242,12 @@ class MainWindow(QMainWindow):
             screenshot.save(filename)
             self.log_status(f"Screenshot saved to {filename}")
 
-    def on_save_finished(self, filename):
-        """Handle save completion and save pipeline history."""
+    def on_save_finished(self, filename: str) -> None:
+        """Handle save completion and save pipeline history.
+
+        Args:
+            filename: Path to the saved file.
+        """
         
         history_saved = False
         history_path = None
@@ -265,8 +272,8 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.information(self, "Save Successful", f"Data saved to:\n{filename}")
 
-    def on_save_project(self):
-        """Handle Save Project menu action - save to current file or prompt for new."""
+    def on_save_project(self) -> None:
+        """Handle Save Project menu action - saves to current file or prompts for new."""
         if self.raw_data is None and self._worker_epochs is None:
             QMessageBox.warning(self, "No Data", "Please load a dataset first before saving a project.")
             return
@@ -279,8 +286,8 @@ class MainWindow(QMainWindow):
             # No current project, use Save As behavior
             self.on_save_project_as()
 
-    def on_save_project_as(self):
-        """Handle Save Project As menu action - always prompt for new file."""
+    def on_save_project_as(self) -> None:
+        """Handle Save Project As menu action - always prompts for new file."""
         if self.raw_data is None and self._worker_epochs is None:
             QMessageBox.warning(self, "No Data", "Please load a dataset first before saving a project.")
             return
@@ -298,8 +305,8 @@ class MainWindow(QMainWindow):
             state_payload = self._collect_session_state()
             self.request_save_session.emit(file_path, state_payload)
 
-    def on_open_project(self):
-        """Handle Open Project menu action - load session from .nflow file."""
+    def on_open_project(self) -> None:
+        """Handle Open Project menu action - loads session from .nflow file."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open Project",
@@ -498,7 +505,6 @@ class MainWindow(QMainWindow):
             self.raw_original = None
         else:
             self.raw_data = data
-            self.raw_original = self.raw_original or state.get('raw_original')
             self.epochs_data = None
 
         # Enable buttons based on data type
@@ -975,19 +981,28 @@ class MainWindow(QMainWindow):
             self._log_pipeline("ica_exclusion", {"excluded_components": self._pending_ica_excludes})
             self._pending_ica_excludes = None
 
-    def log_status(self, message):
-        """Appends message to the sidebar status log."""
+    def log_status(self, message: str) -> None:
+        """Append message to the sidebar status log.
+
+        Args:
+            message: Status message to display.
+        """
         self.log_area.append(f">> {message}")
         self.log_area.verticalScrollBar().setValue(
             self.log_area.verticalScrollBar().maximum()
         )
 
-    def show_error(self, message):
-        """Displays error message box and logs it."""
+    def show_error(self, message: str) -> None:
+        """Display error message box and log it.
+
+        Args:
+            message: Error message to display.
+        """
         self.log_status(f"ERROR: {message}")
         QMessageBox.critical(self, "Error", message)
 
-    def browse_file(self):
+    def browse_file(self) -> None:
+        """Open file dialog to browse and load an EEG data file."""
         file_name, _ = QFileDialog.getOpenFileName(
             self,
             "Open EEG Data",
@@ -1000,8 +1015,12 @@ class MainWindow(QMainWindow):
         else:
             self.log_status("File selection cancelled.")
 
-    def on_data_loaded(self, data):
-        """Called when worker successfully loads data."""
+    def on_data_loaded(self, data) -> None:
+        """Handle successful data load from worker.
+
+        Args:
+            data: Loaded MNE Raw or Epochs data.
+        """
         # Determine if we loaded epochs or raw data
         is_epochs = isinstance(data, BaseEpochs)
         
@@ -1073,15 +1092,15 @@ class MainWindow(QMainWindow):
         data_type = "Epoched" if is_epochs else "Raw"
         QMessageBox.information(self, "Success", f"{data_type} EEG Data Loaded Successfully.")
 
-    def check_sensors(self):
-        """Visualize sensor positions."""
+    def check_sensors(self) -> None:
+        """Visualize sensor positions in a topographic map."""
         data = self.raw_data or self.epochs_data
         if data:
             self.log_status("Visualizing sensor positions...")
             # block=False ensures the GUI doesn't freeze
             data.plot_sensors(show_names=True, kind='topomap', block=False)
 
-    def show_dataset_info(self):
+    def show_dataset_info(self) -> None:
         """Display comprehensive dataset metadata in a dialog."""
         data = self.raw_data or self.epochs_data
         if data is None:
@@ -1095,8 +1114,8 @@ class MainWindow(QMainWindow):
         dialog = DatasetInfoDialog(data, parent=self, pipeline_history=self.pipeline_history)
         dialog.exec()
 
-    def launch_pipeline(self):
-        """Reads inputs and signals worker to start processing."""
+    def launch_pipeline(self) -> None:
+        """Read filter inputs and signal worker to start preprocessing pipeline."""
         try:
             # Inputs
             text_hp = self.input_hp.text()
@@ -1122,10 +1141,12 @@ class MainWindow(QMainWindow):
         except ValueError:
             self.show_error("Invalid Filter Parameters. Please enter numeric values.")
 
-    def run_ica_click(self):
+    def run_ica_click(self) -> None:
+        """Signal worker to compute ICA decomposition."""
         self.request_run_ica.emit()
 
-    def apply_ica_click(self):
+    def apply_ica_click(self) -> None:
+        """Signal worker to apply ICA with specified exclusions."""
         excludes = self.input_ica_exclude.text()
         
         # Store pending ICA params for history logging
@@ -1138,8 +1159,12 @@ class MainWindow(QMainWindow):
         
         self.request_apply_ica.emit(excludes)
 
-    def populate_event_dropdown(self, event_id_dict):
-        """Populates the event dropdown with unique events found in the data."""
+    def populate_event_dropdown(self, event_id_dict: dict) -> None:
+        """Populate the event dropdown with events found in the data.
+
+        Args:
+            event_id_dict: Dictionary mapping event names to event IDs.
+        """
         self.combo_events.clear()
         self.epochs = None  # Reset epochs when new data is loaded
         self.epochs_inspected = False
@@ -1162,9 +1187,9 @@ class MainWindow(QMainWindow):
 
         self.log_status(f"Populated event dropdown with {len(event_id_dict)} events.")
 
-    def create_epochs_click(self):
+    def create_epochs_click(self) -> None:
         """Create epochs from continuous data using selected event trigger.
-        
+
         If epoched data is already loaded (from -epo.fif file), use that directly
         instead of trying to create new epochs from raw data.
         """
@@ -1215,11 +1240,11 @@ class MainWindow(QMainWindow):
         self.btn_conn.setEnabled(True)
         self.epochs_inspected = False
 
-    def inspect_epochs_click(self):
-        """
-        Gold Standard manual QC: Opens MNE's interactive epoch viewer.
+    def inspect_epochs_click(self) -> None:
+        """Open MNE's interactive epoch viewer for manual artifact rejection.
+
         User can click epochs to mark them as 'bad'. On close, bad epochs are dropped.
-        This MUST run on Main Thread since epochs.plot() creates a GUI window.
+        Must run on Main Thread since epochs.plot() creates a GUI window.
         """
         # Check if epochs have been created
         if self._worker_epochs is None:
@@ -1335,10 +1360,8 @@ class MainWindow(QMainWindow):
             self.log_status(f"Error processing epoch rejections: {str(e)}")
             logger.exception("Error processing epoch rejections")
 
-    def compute_erp_click(self):
-        """
-        Compute ERP using pre-existing epochs from the worker.
-        """
+    def compute_erp_click(self) -> None:
+        """Compute ERP using pre-existing epochs from the worker."""
         # Check if epochs exist
         if self._worker_epochs is None:
             self.show_error("No epochs available. Please create epochs first using the Segmentation section.")
@@ -1371,7 +1394,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.show_error(f"Plotting Error: {e}")
 
-    def compute_tfr_click(self):
+    def compute_tfr_click(self) -> None:
+        """Compute Time-Frequency Representation for selected channel and parameters."""
         # Check if epochs exist
         if self._worker_epochs is None:
             self.show_error("No epochs available. Please create epochs first using the Segmentation section.")
@@ -1425,7 +1449,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.show_error(f"TFR Plot Error: {e}")
 
-    def compute_connectivity_click(self):
+    def compute_connectivity_click(self) -> None:
+        """Compute connectivity (wPLI) in the Alpha band (8-12 Hz)."""
         # Check if epochs exist
         if self._worker_epochs is None:
             self.show_error("No epochs available. Please create epochs first using the Segmentation section.")
@@ -1478,11 +1503,16 @@ class MainWindow(QMainWindow):
             self.show_error(f"Connectivity Plot Error: {e}")
             logger.exception("Connectivity plot error")
 
-    def update_plot(self, freqs, psd_mean, filter_info_str):
-        """Updates the Matplotlib canvas with the new PSD data.
+    def update_plot(self, freqs, psd_mean, filter_info_str: str) -> None:
+        """Update Matplotlib canvas with PSD data.
 
         PSD is displayed in linear power (μV²/Hz) for better scientific interpretation.
         MNE returns V²/Hz, so we multiply by 1e12 to convert to μV²/Hz.
+
+        Args:
+            freqs: Frequency array.
+            psd_mean: Power spectral density values (V²/Hz).
+            filter_info_str: Filter info string for title.
         """
         self.canvas.axes.clear()
 
@@ -1507,7 +1537,7 @@ class MainWindow(QMainWindow):
 
         self.canvas.draw()
 
-    def update_time_series_plot(self, _state=None):
+    def update_time_series_plot(self, _state=None) -> None:
         """Update the Signal Monitor with clinical stacked time-series plot.
 
         Args:
@@ -1550,8 +1580,13 @@ class MainWindow(QMainWindow):
             scale=scale
         )
 
-    def on_data_updated(self, raw, info_str):
-        """Handle data_updated signal from worker after pipeline operations."""
+    def on_data_updated(self, raw, info_str: str) -> None:
+        """Handle data_updated signal from worker after pipeline operations.
+
+        Args:
+            raw: Updated MNE Raw data.
+            info_str: Filter info string for display.
+        """
         self.raw_data = raw
         self.current_filter_info = info_str
         
@@ -1589,9 +1624,7 @@ class MainWindow(QMainWindow):
             return
         self.update_time_series_plot()
     
-    def on_nav_controls_changed(self, _value=None):
-        """Legacy handler - now handled by nav_bar signals."""
-        pass
+
 
     def open_channel_manager(self):
         """Open the Channel Manager dialog for bad channel interpolation."""
@@ -1612,8 +1645,12 @@ class MainWindow(QMainWindow):
         self.log_status(f"Starting interpolation for channels: {', '.join(channels)}")
         self.request_interpolate_bads.emit(channels)
 
-    def on_interpolation_done(self, channels: list):
-        """Handle successful channel interpolation."""
+    def on_interpolation_done(self, channels: list) -> None:
+        """Handle successful channel interpolation.
+
+        Args:
+            channels: List of interpolated channel names.
+        """
         channel_str = ", ".join(channels)
         self.log_status(f"Successfully interpolated channels: {channel_str}")
         
@@ -1663,8 +1700,6 @@ class MainWindow(QMainWindow):
 
     def on_report_ready(self, report_path: str):
         """Handle successful report generation."""
-        import webbrowser  # lazy import: rarely used, avoids startup cost
-
         abs_path = os.path.abspath(report_path)
         self.log_status(f"Report generated: {abs_path}")
 

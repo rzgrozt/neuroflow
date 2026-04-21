@@ -115,6 +115,14 @@ class EEGWorker(QObject):
         """
         self.epochs = epochs
 
+    def _batch_log(self, message: str, prefix: str = "  → ") -> None:
+        """Emit a batch log message with consistent prefix.
+
+        Args:
+            message: The message to emit.
+            prefix: The prefix to prepend (default: "  → ").
+        """
+        self.batch_log.emit(f"{prefix}{message}")
 
     def _read_file(self, file_path: str) -> mne.io.BaseRaw | None:
         """Read EEG data from supported file formats.
@@ -265,7 +273,7 @@ class EEGWorker(QObject):
             logger.exception("Failed to load EEG data from %s", file_path)
 
     @pyqtSlot(float, float, float)
-    def run_pipeline(self, l_freq: float, h_freq: float, notch_freq: float):
+    def run_pipeline(self, l_freq: float, h_freq: float, notch_freq: float) -> None:
         """Run preprocessing pipeline: Filtering on working copy (cumulative)."""
         if self.raw is None:
             self.error_occurred.emit("No data loaded. Please load a dataset first.")
@@ -317,7 +325,7 @@ class EEGWorker(QObject):
         return ica
 
     @pyqtSlot()
-    def run_ica(self):
+    def run_ica(self) -> None:
         """Fit ICA on the current data."""
         if self.raw is None:
             self.error_occurred.emit("No data loaded. Cannot run ICA.")
@@ -337,7 +345,7 @@ class EEGWorker(QObject):
             logger.exception("ICA fitting failed")
 
     @pyqtSlot(str)
-    def apply_ica(self, exclude_str: str):
+    def apply_ica(self, exclude_str: str) -> None:
         """Apply ICA with excluded components to the working copy (cumulative)."""
         if self.ica is None:
             self.error_occurred.emit("ICA has not been calculated yet.")
@@ -370,7 +378,7 @@ class EEGWorker(QObject):
             logger.exception("ICA apply failed")
 
     @pyqtSlot(str, float, float, bool)
-    def create_epochs(self, event_name: str, tmin: float, tmax: float, apply_baseline: bool = True):
+    def create_epochs(self, event_name: str, tmin: float, tmax: float, apply_baseline: bool = True) -> None:
         """Create epochs from raw data around event triggers.
 
         This method creates epochs and stores them in self.epochs for use by
@@ -438,7 +446,7 @@ class EEGWorker(QObject):
             logger.exception("Epoch creation failed")
 
     @pyqtSlot()
-    def compute_erp(self):
+    def compute_erp(self) -> None:
         """Compute ERP by averaging pre-existing epochs.
 
         Requires epochs to be created first using create_epochs().
@@ -532,7 +540,7 @@ class EEGWorker(QObject):
             logger.exception("TFR computation failed")
 
     @pyqtSlot(str)
-    def save_data(self, filename: str):
+    def save_data(self, filename: str) -> None:
         """Save the current raw object to a .fif file."""
         if self.raw is None:
             self.error_occurred.emit("No data to save.")
@@ -552,7 +560,7 @@ class EEGWorker(QObject):
             logger.exception("Data save failed")
 
     @pyqtSlot(str)
-    def save_epochs(self, filename: str):
+    def save_epochs(self, filename: str) -> None:
         """Save the current epochs object to a .fif file."""
         if self.epochs is None:
             self.error_occurred.emit("No epochs to save. Please create epochs first.")
@@ -575,7 +583,7 @@ class EEGWorker(QObject):
             logger.exception("Epochs save failed")
 
     @pyqtSlot()
-    def compute_connectivity(self):
+    def compute_connectivity(self) -> None:
         """Compute Functional Connectivity using wPLI in Alpha Band (8-12Hz).
 
         Requires epochs to be created first using create_epochs().
@@ -614,7 +622,7 @@ class EEGWorker(QObject):
 
 
     @pyqtSlot(list)
-    def interpolate_bads(self, bad_channels: list):
+    def interpolate_bads(self, bad_channels: list) -> None:
         """Interpolate bad channels using spherical spline interpolation.
         
         Args:
@@ -946,6 +954,10 @@ class EEGWorker(QObject):
 
         # Scan for EEG files
         supported_extensions = ('.vhdr', '.fif', '.edf')
+        if not os.path.isdir(input_folder):
+            self.batch_error.emit("", f"Input folder does not exist: {input_folder}")
+            self.batch_finished.emit("Batch processing failed: Invalid input folder.")
+            return
         eeg_files = []
         for filename in os.listdir(input_folder):
             if filename.lower().endswith(supported_extensions):
@@ -986,11 +998,11 @@ class EEGWorker(QObject):
 
             try:
                 # Step 1: Load data
-                self.batch_log.emit("  → Loading data...")
+                self._batch_log("Loading data...")
                 raw = self._read_file(file_path)
                 
                 if raw is None:
-                    self.batch_log.emit("  ⚠ Skipping epoched file.")
+                    self._batch_log("Skipping epoched file.", prefix="  ⚠ ")
                     continue
 
                 self._set_channel_types(raw)
@@ -1002,7 +1014,7 @@ class EEGWorker(QObject):
                     h_freq = params.get('h_freq', DEFAULT_BATCH_LOWPASS)
                     notch_freq = params.get('notch_freq', 0.0)
 
-                    self.batch_log.emit(f"  → Filtering (HP={l_freq}Hz, LP={h_freq}Hz)...")
+                    self._batch_log(f"Filtering (HP={l_freq}Hz, LP={h_freq}Hz)...")
                     
                     lf = l_freq if l_freq > 0 else None
                     hf = h_freq if h_freq > 0 else None
@@ -1011,19 +1023,19 @@ class EEGWorker(QObject):
                         raw.filter(l_freq=lf, h_freq=hf, fir_design='firwin', verbose=False)
                     
                     if notch_freq > 0:
-                        self.batch_log.emit(f"  → Applying notch filter at {notch_freq}Hz...")
+                        self._batch_log(f"Applying notch filter at {notch_freq}Hz...")
                         raw.notch_filter(freqs=np.array([notch_freq]), fir_design='firwin', verbose=False)
 
                 # Step 3: Auto-ICA for artifact removal
                 ica = None
                 if params.get('ica', True):
-                    self.batch_log.emit("  → Running Auto-ICA...")
+                    self._batch_log("Running Auto-ICA...")
 
                     try:
                         # Fit ICA using shared helper
-                        self.batch_log.emit("  → Fitting ICA components...")
+                        self._batch_log("Fitting ICA components...")
                         ica = self._fit_ica(raw)
-                        self.batch_log.emit(f"  → ICA fitted with {ica.n_components_} components.")
+                        self._batch_log(f"ICA fitted with {ica.n_components_} components.")
 
                         # Smart EOG Channel Selection
                         eog_channel = None
@@ -1036,7 +1048,7 @@ class EEGWorker(QObject):
 
                         if eog_channels:
                             eog_channel = eog_channels[0]
-                            self.batch_log.emit(f"  → Using EOG channel: {eog_channel}")
+                            self._batch_log(f"Using EOG channel: {eog_channel}")
                         else:
                             # Option 2: Check for channels with 'eog' in name
                             eog_name_channels = [ch for ch in raw.ch_names
@@ -1044,7 +1056,7 @@ class EEGWorker(QObject):
 
                             if eog_name_channels:
                                 eog_channel = eog_name_channels[0]
-                                self.batch_log.emit(f"  → Using EOG-named channel: {eog_channel}")
+                                self._batch_log(f"Using EOG-named channel: {eog_channel}")
                             else:
                                 # Option 3: Fallback to frontal channels (Fp1, Fp2) as surrogate EOG
                                 frontal_surrogates = ['Fp1', 'Fp2', 'FP1', 'FP2', 'Fpz', 'FPz']
@@ -1052,9 +1064,9 @@ class EEGWorker(QObject):
 
                                 if available_frontals:
                                     eog_channel = available_frontals[0]
-                                    self.batch_log.emit(f"  → Using frontal channel as EOG surrogate: {eog_channel}")
+                                    self._batch_log(f"Using frontal channel as EOG surrogate: {eog_channel}")
                                 else:
-                                    self.batch_log.emit("  → No EOG or frontal channels found for artifact detection.")
+                                    self._batch_log("No EOG or frontal channels found for artifact detection.")
 
                         # Detect EOG artifacts using find_bads_eog
                         if eog_channel:
@@ -1062,32 +1074,34 @@ class EEGWorker(QObject):
                                 eog_indices, eog_scores = ica.find_bads_eog(
                                     raw, ch_name=eog_channel, verbose=False
                                 )
-                                self.batch_log.emit(f"  → EOG correlation scores: {[f'{s:.2f}' for s in eog_scores[:5]]}")
+                                self._batch_log(f"EOG correlation scores: {[f'{s:.2f}' for s in eog_scores[:5]]}")
                             except Exception as e:
-                                self.batch_log.emit(f"  ⚠ EOG detection with {eog_channel} failed: {str(e)}")
+                                self._batch_log(f"EOG detection with {eog_channel} failed: {str(e)}", prefix="  ⚠ ")
                                 # Try without specifying channel as last resort
                                 try:
                                     eog_indices, eog_scores = ica.find_bads_eog(raw, verbose=False)
-                                except Exception:
+                                except Exception as e:
+                                    self._batch_log(f"Fallback EOG detection failed: {str(e)}", prefix="  ⚠ ")
                                     eog_indices = []
                         else:
                             # Try automatic detection without specific channel
                             try:
                                 eog_indices, eog_scores = ica.find_bads_eog(raw, verbose=False)
-                            except Exception:
+                            except Exception as e:
+                                self._batch_log(f"Auto EOG detection failed: {str(e)}", prefix="  ⚠ ")
                                 eog_indices = []
 
                         # Apply ICA cleaning
                         if eog_indices:
                             ica.exclude = list(eog_indices)
-                            self.batch_log.emit(f"  → Auto-ICA: Removing components {list(eog_indices)}")
+                            self._batch_log(f"Auto-ICA: Removing components {list(eog_indices)}")
                             ica.apply(raw)
-                            self.batch_log.emit("  ✓ ICA artifact removal applied.")
+                            self._batch_log("ICA artifact removal applied.", prefix="  ✓ ")
                         else:
-                            self.batch_log.emit("  → No EOG artifacts detected automatically.")
+                            self._batch_log("No EOG artifacts detected automatically.")
 
                     except Exception as e:
-                        self.batch_log.emit(f"  ⚠ ICA failed: {str(e)}")
+                        self._batch_log(f"ICA failed: {str(e)}", prefix="  ⚠ ")
                         ica = None  # Reset ICA on failure
 
                 # Step 4: Create epochs if requested
@@ -1103,7 +1117,7 @@ class EEGWorker(QObject):
                             tmax = params.get('tmax', DEFAULT_EPOCH_TMAX)
                             apply_baseline = params.get('baseline', True)
                             
-                            self.batch_log.emit(f"  → Creating epochs (tmin={tmin}, tmax={tmax})...")
+                            self._batch_log(f"Creating epochs (tmin={tmin}, tmax={tmax})...")
                             
                             # Determine event_id for epoching
                             if event_name == "All Events":
@@ -1122,33 +1136,33 @@ class EEGWorker(QObject):
                             if apply_baseline:
                                 epochs.apply_baseline((tmin, 0))
                             
-                            self.batch_log.emit(f"  → Created {len(epochs)} epochs.")
+                            self._batch_log(f"Created {len(epochs)} epochs.")
                             
                             # Compute ERP for report
                             evoked = epochs.average()
                         else:
-                            self.batch_log.emit("  ⚠ No events found, skipping epoching.")
+                            self._batch_log("No events found, skipping epoching.", prefix="  ⚠ ")
                             
                     except Exception as e:
-                        self.batch_log.emit(f"  ⚠ Epoching failed: {str(e)}")
+                        self._batch_log(f"Epoching failed: {str(e)}", prefix="  ⚠ ")
 
                 # Step 5: Save processed data
-                self.batch_log.emit("  → Saving processed data...")
+                self._batch_log("Saving processed data...")
                 
                 # Save cleaned raw data
                 output_raw_path = os.path.join(output_folder, f"{base_name}_cleaned.fif")
                 raw.save(output_raw_path, overwrite=True)
-                self.batch_log.emit(f"  ✓ Saved: {os.path.basename(output_raw_path)}")
+                self._batch_log(f"Saved: {os.path.basename(output_raw_path)}", prefix="  ✓ ")
                 
                 # Save epochs if created
                 if epochs is not None:
                     output_epochs_path = os.path.join(output_folder, f"{base_name}-epo.fif")
                     epochs.save(output_epochs_path, overwrite=True)
-                    self.batch_log.emit(f"  ✓ Saved: {os.path.basename(output_epochs_path)}")
+                    self._batch_log(f"Saved: {os.path.basename(output_epochs_path)}", prefix="  ✓ ")
 
                 # Step 6: Generate HTML report
                 if params.get('report', True):
-                    self.batch_log.emit("  → Generating report...")
+                    self._batch_log("Generating report...")
                     try:
                         report = mne.Report(title=f"NeuroFlow Batch Report: {base_name}")
                         report.add_raw(raw, title="Cleaned Data", psd=True)
@@ -1164,19 +1178,19 @@ class EEGWorker(QObject):
                         
                         report_path = os.path.join(output_folder, f"{base_name}_report.html")
                         report.save(report_path, overwrite=True, open_browser=False)
-                        self.batch_log.emit(f"  ✓ Report: {os.path.basename(report_path)}")
+                        self._batch_log(f"Report: {os.path.basename(report_path)}", prefix="  ✓ ")
                         
                     except Exception as e:
-                        self.batch_log.emit(f"  ⚠ Report generation failed: {str(e)}")
+                        self._batch_log(f"Report generation failed: {str(e)}", prefix="  ⚠ ")
 
-                self.batch_log.emit(f"  ✓ Completed: {filename}")
+                self._batch_log(f"Completed: {filename}", prefix="  ✓ ")
                 successful += 1
 
             except Exception as e:
                 failed += 1
                 failed_files.append(filename)
                 error_msg = str(e)
-                self.batch_log.emit(f"  ✗ FAILED: {error_msg}")
+                self._batch_log(f"FAILED: {error_msg}", prefix="  ✗ ")
                 self.batch_error.emit(filename, error_msg)
                 logger.exception(f"Batch processing failed for {filename}")
 
