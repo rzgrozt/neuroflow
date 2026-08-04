@@ -13,6 +13,10 @@ venv.bak/
 # AI/MCP related files
 .serena/
 .claude/
+.omo/
+.sisyphus/
+.code-review-graph/
+.codegraph
 PROJECT_INDEX.md
 PROJECT_INDEX.json
 CLAUDE.md
@@ -23,6 +27,16 @@ CLAUDE.md
 .copilot/
 .codeium/
 .tabnine/
+AGENTS.md
+**/AGENTS.md
+entities.json
+mempalace.yaml
+mempalace.yml
+graphify-out/
+
+# AI-agent GitHub workflows
+.github/workflows/claude.yml
+.github/workflows/claude-code-review.yml
 
 # Generated reports (optional - remove if you want to track these)
 *_report.html
