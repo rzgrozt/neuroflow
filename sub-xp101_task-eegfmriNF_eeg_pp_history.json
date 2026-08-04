@@ -1,0 +1,37 @@
+[
+    {
+        "timestamp": "2026-01-18T21:27:08",
+        "action": "data_loaded",
+        "params": {
+            "filename": "sub-xp101_task-eegfmriNF_eeg_pp",
+            "type": "raw"
+        }
+    },
+    {
+        "timestamp": "2026-01-18T21:27:13",
+        "action": "filter",
+        "params": {
+            "highpass": 1.0,
+            "lowpass": 40.0,
+            "notch": 50.0
+        }
+    },
+    {
+        "timestamp": "2026-01-18T21:28:11",
+        "action": "ica_exclusion",
+        "params": {
+            "excluded_components": [
+                3,
+                10
+            ]
+        }
+    },
+    {
+        "timestamp": "2026-01-18T21:29:27",
+        "action": "manual_epoch_rejection",
+        "params": {
+            "kept": 383,
+            "rejected": 5
+        }
+    }
+]
